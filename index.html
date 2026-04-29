@@ -10,9 +10,6 @@
         th { background: #222; }
         tr:hover { background: #333; }
         canvas { max-width: 800px; margin: 30px auto; }
-        .good { color: #00ff88; }
-        .warn { color: #ffcc00; }
-        .bad { color: #ff4444; }
     </style>
 </head>
 
@@ -29,6 +26,7 @@
             <th>Profit</th>
             <th>ROI (%)</th>
             <th>AI Signal</th>
+            <th>Spike Alert</th>
         </tr>
     </table>
 
@@ -43,6 +41,20 @@ function savePriceHistory(item, price) {
     history.push({ time: Date.now(), price });
     if (history.length > 30) history.shift();
     localStorage.setItem(item, JSON.stringify(history));
+}
+
+function detectSpike(item) {
+    let history = JSON.parse(localStorage.getItem(item.name) || "[]");
+    if (history.length < 5) return "";
+
+    const last = history[history.length - 1].price;
+    const prev = history[history.length - 2].price;
+
+    const change = ((last - prev) / prev) * 100;
+
+    if (change > 3) return "⚡ BUY BEFORE SPIKE";
+    if (change < -3) return "📉 DROPPING";
+    return "";
 }
 
 function drawChart(item) {
@@ -71,7 +83,6 @@ function drawChart(item) {
 
 function aiDecision(item) {
     const roi = item.roi;
-
     const volatilityPenalty = Math.random() * 10;
     const manipulationRisk = roi > 200 ? 30 : 0;
 
@@ -113,7 +124,6 @@ async function getFlips() {
 
         const roi = (net_profit / buy_price) * 100;
 
-        // anti manipulation filter
         if (stats.sellMovingWeek < 50000 || roi > 500) continue;
 
         results.push({
@@ -143,6 +153,7 @@ async function getFlips() {
             <th>Profit</th>
             <th>ROI (%)</th>
             <th>AI Signal</th>
+            <th>Spike Alert</th>
         </tr>
     `;
 
@@ -150,6 +161,7 @@ async function getFlips() {
         const row = table.insertRow();
 
         const signal = aiDecision(flip);
+        const spike = detectSpike(flip);
 
         row.innerHTML = `
             <td>${flip.name}</td>
@@ -157,6 +169,7 @@ async function getFlips() {
             <td>${flip.profit.toFixed(1)}</td>
             <td>${flip.roi.toFixed(2)}</td>
             <td>${signal}</td>
+            <td style="color:#ffcc00">${spike}</td>
         `;
 
         if(i===0){
