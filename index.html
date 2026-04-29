@@ -24,22 +24,58 @@ body{
     height:100vh;
 }
 
+/* SIDEBAR */
 .sidebar{
     background:#0f172a;
     padding:10px;
     border-right:1px solid #222;
 }
 
-.sidebar select{
+.sidebar select,
+.sidebar input{
     width:100%;
     padding:8px;
     background:#111827;
     color:white;
     border:none;
+    margin-bottom:8px;
 }
 
+/* MAIN */
 .main{
     padding:15px;
+}
+
+.kpis{
+    display:flex;
+    gap:10px;
+    margin-bottom:10px;
+}
+
+.card{
+    flex:1;
+    background:#111827;
+    padding:10px;
+    border-radius:8px;
+    border:1px solid #222;
+}
+
+.card h3{
+    margin:0;
+    font-size:12px;
+    color:#9ca3af;
+}
+
+.card p{
+    margin:5px 0 0;
+    font-size:16px;
+}
+
+.best{
+    background:#111827;
+    padding:10px;
+    border-left:4px solid #00ff88;
+    margin-bottom:10px;
 }
 
 table{
@@ -54,7 +90,13 @@ th,td{
     text-align:center;
 }
 
-th{ background:#111827; }
+th{
+    background:#111827;
+}
+
+.buy{ color:#00ff88; font-weight:bold; }
+.wait{ color:#ffcc00; }
+.avoid{ color:#ff4444; }
 
 canvas{
     margin-top:10px;
@@ -63,15 +105,19 @@ canvas{
     padding:10px;
 }
 
-.buy{ color:#00ff88; font-weight:bold; }
-.wait{ color:#ffcc00; }
-.avoid{ color:#ff4444; }
+.itemRow{
+    padding:8px;
+    border-bottom:1px solid #222;
+    cursor:pointer;
+}
+.itemRow:hover{ background:#111827; }
 
-.featured{
-    margin-top:10px;
-    padding:10px;
-    background:#111827;
-    border-left:4px solid #00ff88;
+#allItems{
+    max-height:250px;
+    overflow:auto;
+    background:#0f172a;
+    border:1px solid #222;
+    border-radius:8px;
 }
 </style>
 
@@ -86,47 +132,68 @@ canvas{
 
 <div class="container">
 
+<!-- SIDEBAR -->
 <div class="sidebar">
-    <h3>🎯 Select Item</h3>
+
+    <h3>🎯 Item</h3>
     <select id="itemSelect" onchange="updateCharts()"></select>
 
-    <div class="featured">
-        <h3>🔥 Stable Items</h3>
-        🟣 Recombobulator 3000<br>
-        🍪 Booster Cookie
-    </div>
+    <h3>🔍 Search</h3>
+    <input id="search" placeholder="Search item...">
+
+    <h3>📦 All Items</h3>
+    <div id="allItems"></div>
+
 </div>
 
+<!-- MAIN -->
 <div class="main">
 
-    <h3>📊 Price Chart</h3>
-    <canvas id="chart"></canvas>
+    <div class="kpis">
+        <div class="card">
+            <h3>🔥 Best ROI</h3>
+            <p id="bestROI">-</p>
+        </div>
 
-    <h3>📊 Top Bazaar Flips</h3>
+        <div class="card">
+            <h3>📉 Market</h3>
+            <p id="marketStatus">-</p>
+        </div>
+
+        <div class="card">
+            <h3>⚡ Trades</h3>
+            <p id="tradeCount">0</p>
+        </div>
+    </div>
+
+    <div class="best" id="bestTrade">Loading...</div>
+
+    <h3>📊 24H Trend</h3>
+    <canvas id="dayChart"></canvas>
+
+    <h3>📈 7 Day Trend</h3>
+    <canvas id="weekChart"></canvas>
+
+    <h3>📊 Top AI Trades</h3>
     <table id="table"></table>
 
 </div>
-
 </div>
 
 <script>
 
 const TAX = 0.01125;
 
-let chart;
-let marketItems = [];
+let dayChart, weekChart;
+let allMarketItems = [];
 
 /* =========================
-   HISTORY SAFE STORAGE
+   HISTORY
 ========================= */
 function saveHistory(item, price){
-    if(!item || !price) return;
-
     let data = JSON.parse(localStorage.getItem(item) || "[]");
     data.push({ time: Date.now(), price });
-
-    if(data.length > 200) data.shift();
-
+    if (data.length > 500) data.shift();
     localStorage.setItem(item, JSON.stringify(data));
 }
 
@@ -135,182 +202,222 @@ function getHistory(item){
 }
 
 /* =========================
-   SAFE API FETCH
+   REGRESSION
 ========================= */
-async function getBazaar(){
-    try {
-        const res = await fetch("https://api.hypixel.net/skyblock/bazaar", {
-            cache: "no-store"
-        });
+function regression(h){
+    if(h.length < 10) return null;
 
-        if(!res.ok) throw new Error("HTTP ERROR");
+    let n=h.length,sx=0,sy=0,sxy=0,sxx=0;
 
-        const data = await res.json();
-
-        if(!data || !data.products) {
-            throw new Error("INVALID DATA");
-        }
-
-        return data.products;
-
-    } catch (e) {
-        console.error("API FAIL:", e);
-        document.getElementById("status").innerText = "⚠ API ERROR (retrying)";
-        return null;
-    }
-}
-
-/* =========================
-   ANALYSIS
-========================= */
-function calcFlip(stats){
-    const buy = stats.sellPrice;
-    const sell = stats.buyPrice;
-
-    if(!buy || !sell) return null;
-
-    const profit = (sell - buy) - (sell * TAX);
-    const roi = (profit / buy) * 100;
-
-    return { buy, profit, roi };
-}
-
-/* =========================
-   HISTORY + TREND
-========================= */
-function trend(history){
-    if(history.length < 10) return 0;
-
-    let change = 0;
-    for(let i=1;i<history.length;i++){
-        change += history[i].price - history[i-1].price;
+    for(let i=0;i<n;i++){
+        sx+=i;
+        sy+=h[i].price;
+        sxy+=i*h[i].price;
+        sxx+=i*i;
     }
 
-    return change / history.length;
+    return (n*sxy - sx*sy)/(n*sxx - sx*sx)*n + (sy - ((n*sxy - sx*sy)/(n*sxx - sx*sx))*sx)/n;
 }
 
 /* =========================
-   CHART (SAFE)
+   TREND
 ========================= */
-function renderChart(item){
+function trend(h){
+    let s=regression(h.slice(-10));
+    let l=regression(h.slice(-50));
 
-    let h = getHistory(item).slice(-50);
+    if(s>l*1.01) return "UP";
+    if(s<l*0.99) return "DOWN";
+    return "STABLE";
+}
 
-    if(h.length === 0) return;
+/* =========================
+   PUMP
+========================= */
+function pump(h){
+    let avg=h.reduce((a,b)=>a+b.price,0)/h.length;
+    return h[h.length-1].price>avg*1.25;
+}
 
-    let labels = h.map(x => new Date(x.time).toLocaleTimeString());
-    let data = h.map(x => x.price);
+/* =========================
+   SCORE
+========================= */
+function score(item,h){
+    let t=trend(h);
+    let s=item.roi*0.5;
 
-    if(!chart){
-        chart = new Chart(document.getElementById("chart"),{
+    if(t==="UP") s+=20;
+    if(t==="DOWN") s-=30;
+    if(pump(h)) s-=50;
+
+    return s;
+}
+
+/* =========================
+   SIGNAL
+========================= */
+function signal(item,h){
+    let p=regression(h);
+    let c=h[h.length-1].price;
+
+    if(pump(h)) return "❌ MANIPULATION";
+    if(p && p>c*1.02) return "🟢 BUY EARLY";
+    if(item.roi>5) return "🟡 WAIT";
+    return "❌ AVOID";
+}
+
+/* =========================
+   CHART UPDATE (NO RESET)
+========================= */
+function updateCharts(){
+    let i=document.getElementById("itemSelect").value;
+    let h=getHistory(i).slice(-50);
+
+    let labels=h.map(x=>new Date(x.time).toLocaleTimeString());
+    let data=h.map(x=>x.price);
+
+    if(!dayChart){
+        dayChart=new Chart(document.getElementById("dayChart"),{
             type:"line",
-            data:{
-                labels,
-                datasets:[{
-                    label:item,
-                    data,
-                    borderColor:"#00ff99",
-                    fill:false
-                }]
-            }
+            data:{labels,datasets:[{data,borderColor:"#00ff99"}]}
         });
     } else {
-        chart.data.labels = labels;
-        chart.data.datasets[0].data = data;
-        chart.update();
+        dayChart.data.labels=labels;
+        dayChart.data.datasets[0].data=data;
+        dayChart.update();
     }
 }
 
 /* =========================
-   MAIN LOAD
+   ALL ITEMS
 ========================= */
-async function load(){
+function renderAll(items){
+    let box=document.getElementById("allItems");
+    box.innerHTML="";
 
-    const products = await getBazaar();
-    if(!products) return;
+    items.forEach(i=>{
+        let div=document.createElement("div");
+        div.className="itemRow";
 
-    let items = [];
+        div.innerHTML=`<b>${i.name}</b><br><small>${i.price.toFixed(1)} | ${i.roi.toFixed(2)}%</small>`;
 
-    for(const id in products){
+        div.onclick=()=>{
+            document.getElementById("itemSelect").value=i.name;
+            updateCharts();
+        };
 
-        const s = products[id].quick_status;
-        if(!s) continue;
-
-        const flip = calcFlip(s);
-        if(!flip) continue;
-
-        if(s.sellMovingWeek < 100000) continue;
-
-        const name = id.replaceAll("_"," ");
-
-        saveHistory(name, flip.buy);
-
-        items.push({
-            name,
-            price: flip.buy,
-            roi: flip.roi
-        });
-    }
-
-    items.sort((a,b)=>b.roi-a.roi);
-    items = items.slice(0,15);
-
-    marketItems = items;
-
-    render(items);
-
-    document.getElementById("status").innerText =
-        "🟢 LIVE " + new Date().toLocaleTimeString();
-}
-
-/* =========================
-   RENDER UI
-========================= */
-function render(items){
-
-    const table = document.getElementById("table");
-    const select = document.getElementById("itemSelect");
-
-    table.innerHTML = `
-        <tr><th>Item</th><th>Price</th><th>ROI</th></tr>
-    `;
-
-    select.innerHTML = "";
-
-    items.forEach((i,idx)=>{
-
-        table.innerHTML += `
-        <tr>
-            <td>${i.name}</td>
-            <td>${i.price.toFixed(1)}</td>
-            <td>${i.roi.toFixed(2)}%</td>
-        </tr>`;
-
-        const opt = document.createElement("option");
-        opt.value = i.name;
-        opt.text = i.name;
-        select.appendChild(opt);
-
-        if(idx === 0){
-            renderChart(i.name);
-        }
+        box.appendChild(div);
     });
 }
 
 /* =========================
-   CHART UPDATE
+   LOAD
 ========================= */
-function updateCharts(){
-    const item = document.getElementById("itemSelect").value;
-    renderChart(item);
+async function load(){
+    let res=await fetch("https://api.hypixel.net/skyblock/bazaar");
+    let data=await res.json();
+
+    let items=[];
+
+    for(let id in data.products){
+        let s=data.products[id].quick_status;
+
+        let buy=s.sellPrice;
+        let sell=s.buyPrice;
+
+        if(buy<=0||sell<=0)continue;
+
+        let profit=(sell-buy)-(sell*TAX);
+        let roi=(profit/buy)*100;
+
+        if(s.sellMovingWeek<100000)continue;
+
+        let name=id.replaceAll("_"," ");
+
+        saveHistory(name,buy);
+
+        let h=getHistory(name);
+
+        items.push({
+            name,
+            price:buy,
+            roi,
+            score:score({roi},h),
+            signal:signal({roi},h)
+        });
+    }
+
+    allMarketItems=items.slice();
+    renderAll(allMarketItems);
+
+    let crash=items.reduce((a,i)=>a+i.roi,0)/items.length<-2;
+
+    items.sort((a,b)=>b.score-a.score);
+    items=items.slice(0,15);
+
+    render(items,crash);
 }
 
 /* =========================
-   STABLE LOOP (5 SEC)
+   RENDER TOP
+========================= */
+function render(items,crash){
+
+    document.getElementById("status").innerText=
+        crash?"🚨 MARKET CRASH":"🟢 LIVE";
+
+    document.getElementById("bestROI").innerText=
+        items[0]?.roi.toFixed(2)+"%"||"-";
+
+    document.getElementById("bestTrade").innerHTML=
+        "🔥 BEST: <b>"+items[0]?.name+"</b>";
+
+    let table=document.getElementById("table");
+    let select=document.getElementById("itemSelect");
+
+    table.innerHTML=`<tr><th>Item</th><th>Price</th><th>ROI</th><th>Score</th><th>Signal</th></tr>`;
+    select.innerHTML="";
+
+    items.forEach((i,idx)=>{
+
+        table.innerHTML+=`
+        <tr>
+            <td>${i.name}</td>
+            <td>${i.price.toFixed(1)}</td>
+            <td>${i.roi.toFixed(2)}</td>
+            <td>${i.score.toFixed(1)}</td>
+            <td>${i.signal}</td>
+        </tr>`;
+
+        let opt=document.createElement("option");
+        opt.value=i.name;
+        opt.text=i.name;
+        select.appendChild(opt);
+
+        if(idx===0) updateCharts();
+    });
+
+    document.getElementById("marketStatus").innerText=
+        crash?"CRASH":"STABLE";
+}
+
+/* =========================
+   SEARCH
+========================= */
+document.getElementById("search").addEventListener("input",e=>{
+    let v=e.target.value.toLowerCase();
+
+    renderAll(allMarketItems.filter(i=>
+        i.name.toLowerCase().includes(v)
+    ));
+});
+
+/* =========================
+   LOOP (NO PAGE REFRESH)
 ========================= */
 async function loop(){
     await load();
-    setTimeout(loop, 5000);
+    setTimeout(loop,3000);
 }
 
 loop();
