@@ -24,7 +24,6 @@ body{
     height:100vh;
 }
 
-/* SIDEBAR */
 .sidebar{
     background:#0f172a;
     padding:10px;
@@ -37,10 +36,8 @@ body{
     background:#111827;
     color:white;
     border:none;
-    margin-bottom:8px;
 }
 
-/* MAIN */
 .main{
     padding:15px;
 }
@@ -57,9 +54,7 @@ th,td{
     text-align:center;
 }
 
-th{
-    background:#111827;
-}
+th{ background:#111827; }
 
 canvas{
     margin-top:10px;
@@ -68,25 +63,16 @@ canvas{
     padding:10px;
 }
 
-/* FEATURED ITEMS */
-.featured{
-    padding:10px;
-    margin-top:10px;
-    background:#111827;
-    border-left:4px solid #00ff88;
-}
-
-.featured-item{
-    margin-top:6px;
-    padding:6px;
-    background:#0f172a;
-    border-radius:6px;
-}
-
 .buy{ color:#00ff88; font-weight:bold; }
 .wait{ color:#ffcc00; }
 .avoid{ color:#ff4444; }
 
+.featured{
+    margin-top:10px;
+    padding:10px;
+    background:#111827;
+    border-left:4px solid #00ff88;
+}
 </style>
 
 </head>
@@ -100,41 +86,38 @@ canvas{
 
 <div class="container">
 
-<!-- SIDEBAR -->
 <div class="sidebar">
-
     <h3>🎯 Select Item</h3>
     <select id="itemSelect" onchange="updateCharts()"></select>
 
     <div class="featured">
         <h3>🔥 Stable Items</h3>
-        <div class="featured-item">🟣 Recombobulator 3000</div>
-        <div class="featured-item">🍪 Booster Cookie</div>
+        🟣 Recombobulator 3000<br>
+        🍪 Booster Cookie
     </div>
-
 </div>
 
-<!-- MAIN -->
 <div class="main">
 
-    <h3>📊 24H Trend</h3>
-    <canvas id="dayChart"></canvas>
+    <h3>📊 Price Chart</h3>
+    <canvas id="chart"></canvas>
 
     <h3>📊 Top Bazaar Flips</h3>
     <table id="table"></table>
 
 </div>
+
 </div>
 
 <script>
 
 const TAX = 0.01125;
 
-let dayChart;
-let allMarketItems = [];
+let chart;
+let marketItems = [];
 
 /* =========================
-   SAFE HISTORY
+   HISTORY SAFE STORAGE
 ========================= */
 function saveHistory(item, price){
     if(!item || !price) return;
@@ -142,7 +125,7 @@ function saveHistory(item, price){
     let data = JSON.parse(localStorage.getItem(item) || "[]");
     data.push({ time: Date.now(), price });
 
-    if (data.length > 300) data.shift();
+    if(data.length > 200) data.shift();
 
     localStorage.setItem(item, JSON.stringify(data));
 }
@@ -152,97 +135,79 @@ function getHistory(item){
 }
 
 /* =========================
-   SAFE REGRESSION
+   SAFE API FETCH
 ========================= */
-function regression(h){
-    if(!h || h.length < 10) return null;
+async function getBazaar(){
+    try {
+        const res = await fetch("https://api.hypixel.net/skyblock/bazaar", {
+            cache: "no-store"
+        });
 
-    let n=h.length,sx=0,sy=0,sxy=0,sxx=0;
+        if(!res.ok) throw new Error("HTTP ERROR");
 
-    for(let i=0;i<n;i++){
-        sx+=i;
-        sy+=h[i].price;
-        sxy+=i*h[i].price;
-        sxx+=i*i;
+        const data = await res.json();
+
+        if(!data || !data.products) {
+            throw new Error("INVALID DATA");
+        }
+
+        return data.products;
+
+    } catch (e) {
+        console.error("API FAIL:", e);
+        document.getElementById("status").innerText = "⚠ API ERROR (retrying)";
+        return null;
+    }
+}
+
+/* =========================
+   ANALYSIS
+========================= */
+function calcFlip(stats){
+    const buy = stats.sellPrice;
+    const sell = stats.buyPrice;
+
+    if(!buy || !sell) return null;
+
+    const profit = (sell - buy) - (sell * TAX);
+    const roi = (profit / buy) * 100;
+
+    return { buy, profit, roi };
+}
+
+/* =========================
+   HISTORY + TREND
+========================= */
+function trend(history){
+    if(history.length < 10) return 0;
+
+    let change = 0;
+    for(let i=1;i<history.length;i++){
+        change += history[i].price - history[i-1].price;
     }
 
-    let denom = (n*sxx - sx*sx);
-    if(denom === 0) return null;
-
-    let slope = (n*sxy - sx*sy)/denom;
-    let intercept = (sy - slope*sx)/n;
-
-    return slope*n + intercept;
+    return change / history.length;
 }
 
 /* =========================
-   TREND + SCORE
+   CHART (SAFE)
 ========================= */
-function trend(h){
-    if(!h || h.length < 20) return "STABLE";
+function renderChart(item){
 
-    let s=regression(h.slice(-10));
-    let l=regression(h.slice(-50));
+    let h = getHistory(item).slice(-50);
 
-    if(!s || !l) return "STABLE";
+    if(h.length === 0) return;
 
-    if(s > l*1.01) return "UP";
-    if(s < l*0.99) return "DOWN";
-    return "STABLE";
-}
+    let labels = h.map(x => new Date(x.time).toLocaleTimeString());
+    let data = h.map(x => x.price);
 
-function pump(h){
-    if(!h || h.length < 10) return false;
-
-    let avg = h.reduce((a,b)=>a+b.price,0)/h.length;
-    return h[h.length-1].price > avg*1.25;
-}
-
-function score(item,h){
-    let t = trend(h);
-    let s = item.roi || 0;
-
-    if(t==="UP") s+=20;
-    if(t==="DOWN") s-=30;
-    if(pump(h)) s-=50;
-
-    return s;
-}
-
-function signal(item,h){
-    if(!h || h.length < 10) return "WAIT DATA";
-
-    let p = regression(h);
-    let c = h[h.length-1]?.price || 0;
-
-    if(pump(h)) return "❌ MANIPULATION";
-    if(p && p > c*1.02) return "🟢 BUY EARLY";
-    if(item.roi > 5) return "🟡 WAIT";
-
-    return "❌ AVOID";
-}
-
-/* =========================
-   CHART SAFE INIT
-========================= */
-function updateCharts(){
-
-    let sel=document.getElementById("itemSelect");
-    if(!sel.value) return;
-
-    let h=getHistory(sel.value).slice(-50);
-
-    if(h.length===0) return;
-
-    let labels=h.map(x=>new Date(x.time).toLocaleTimeString());
-    let data=h.map(x=>x.price);
-
-    if(!dayChart){
-        dayChart=new Chart(document.getElementById("dayChart"),{
+    if(!chart){
+        chart = new Chart(document.getElementById("chart"),{
             type:"line",
             data:{
                 labels,
                 datasets:[{
+                    label:item,
                     data,
                     borderColor:"#00ff99",
                     fill:false
@@ -250,107 +215,98 @@ function updateCharts(){
             }
         });
     } else {
-        dayChart.data.labels=labels;
-        dayChart.data.datasets[0].data=data;
-        dayChart.update();
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = data;
+        chart.update();
     }
 }
 
 /* =========================
-   FIXED LOAD (NO CRASH)
+   MAIN LOAD
 ========================= */
 async function load(){
 
-    try{
+    const products = await getBazaar();
+    if(!products) return;
 
-        const res = await fetch("https://api.hypixel.net/skyblock/bazaar");
+    let items = [];
 
-        if(!res.ok) throw new Error("API FAIL");
+    for(const id in products){
 
-        const data = await res.json();
+        const s = products[id].quick_status;
+        if(!s) continue;
 
-        if(!data.products) throw new Error("NO DATA");
+        const flip = calcFlip(s);
+        if(!flip) continue;
 
-        let items=[];
+        if(s.sellMovingWeek < 100000) continue;
 
-        for(let id in data.products){
+        const name = id.replaceAll("_"," ");
 
-            let s=data.products[id].quick_status;
-            if(!s) continue;
+        saveHistory(name, flip.buy);
 
-            let buy=s.sellPrice;
-            let sell=s.buyPrice;
-
-            if(!buy||!sell) continue;
-
-            let profit=(sell-buy)-(sell*TAX);
-            let roi=(profit/buy)*100;
-
-            if(s.sellMovingWeek<100000) continue;
-
-            let name=id.replaceAll("_"," ");
-
-            saveHistory(name,buy);
-
-            let h=getHistory(name);
-
-            items.push({
-                name,
-                price:buy,
-                roi,
-                score:score({roi},h),
-                signal:signal({roi},h)
-            });
-        }
-
-        allMarketItems = items.slice();
-
-        items.sort((a,b)=>b.score-a.score);
-        items = items.slice(0,15);
-
-        render(items);
-
-        document.getElementById("status").innerText="🟢 LIVE";
-
-    } catch(e){
-        console.log(e);
-        document.getElementById("status").innerText="⚠ API ERROR (retrying...)";
+        items.push({
+            name,
+            price: flip.buy,
+            roi: flip.roi
+        });
     }
+
+    items.sort((a,b)=>b.roi-a.roi);
+    items = items.slice(0,15);
+
+    marketItems = items;
+
+    render(items);
+
+    document.getElementById("status").innerText =
+        "🟢 LIVE " + new Date().toLocaleTimeString();
 }
 
 /* =========================
-   RENDER
+   RENDER UI
 ========================= */
 function render(items){
 
-    let table=document.getElementById("table");
-    let sel=document.getElementById("itemSelect");
+    const table = document.getElementById("table");
+    const select = document.getElementById("itemSelect");
 
-    table.innerHTML=`<tr><th>Item</th><th>Price</th><th>ROI</th><th>Score</th><th>Signal</th></tr>`;
-    sel.innerHTML="";
+    table.innerHTML = `
+        <tr><th>Item</th><th>Price</th><th>ROI</th></tr>
+    `;
+
+    select.innerHTML = "";
 
     items.forEach((i,idx)=>{
 
-        table.innerHTML+=`
+        table.innerHTML += `
         <tr>
             <td>${i.name}</td>
             <td>${i.price.toFixed(1)}</td>
-            <td>${i.roi.toFixed(2)}</td>
-            <td>${i.score.toFixed(1)}</td>
-            <td>${i.signal}</td>
+            <td>${i.roi.toFixed(2)}%</td>
         </tr>`;
 
-        let opt=document.createElement("option");
-        opt.value=i.name;
-        opt.text=i.name;
-        sel.appendChild(opt);
+        const opt = document.createElement("option");
+        opt.value = i.name;
+        opt.text = i.name;
+        select.appendChild(opt);
 
-        if(idx===0) updateCharts();
+        if(idx === 0){
+            renderChart(i.name);
+        }
     });
 }
 
 /* =========================
-   STABLE LOOP (5s FIX)
+   CHART UPDATE
+========================= */
+function updateCharts(){
+    const item = document.getElementById("itemSelect").value;
+    renderChart(item);
+}
+
+/* =========================
+   STABLE LOOP (5 SEC)
 ========================= */
 async function loop(){
     await load();
