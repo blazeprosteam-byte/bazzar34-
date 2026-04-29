@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pro Bazaar Trading Terminal</title>
+    <title>Pro Bazaar Trading Perosnal </title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
@@ -31,8 +31,8 @@ body{
     border-right:1px solid #222;
 }
 
-.sidebar select,
-.sidebar input{
+.sidebar input,
+.sidebar select{
     width:100%;
     padding:8px;
     background:#111827;
@@ -110,14 +110,17 @@ canvas{
     border-bottom:1px solid #222;
     cursor:pointer;
 }
-.itemRow:hover{ background:#111827; }
+
+.itemRow:hover{
+    background:#111827;
+}
 
 #allItems{
-    max-height:250px;
+    max-height:260px;
     overflow:auto;
-    background:#0f172a;
     border:1px solid #222;
     border-radius:8px;
+    background:#0f172a;
 }
 </style>
 
@@ -135,11 +138,11 @@ canvas{
 <!-- SIDEBAR -->
 <div class="sidebar">
 
-    <h3>🎯 Item</h3>
-    <select id="itemSelect" onchange="updateCharts()"></select>
+    <h3>🔍 Search Bazaar</h3>
+    <input id="search" placeholder="Search item..." oninput="searchBazaar()">
 
-    <h3>🔍 Search</h3>
-    <input id="search" placeholder="Search item...">
+    <h3>🎯 Select Item</h3>
+    <select id="itemSelect" onchange="updateCharts()"></select>
 
     <h3>📦 All Items</h3>
     <div id="allItems"></div>
@@ -161,8 +164,8 @@ canvas{
         </div>
 
         <div class="card">
-            <h3>⚡ Trades</h3>
-            <p id="tradeCount">0</p>
+            <h3>⚡ Items</h3>
+            <p id="itemCount">0</p>
         </div>
     </div>
 
@@ -185,10 +188,12 @@ canvas{
 const TAX = 0.01125;
 
 let dayChart, weekChart;
+
 let allMarketItems = [];
+let filteredItems = [];
 
 /* =========================
-   HISTORY
+   HISTORY SYSTEM
 ========================= */
 function saveHistory(item, price){
     let data = JSON.parse(localStorage.getItem(item) || "[]");
@@ -216,11 +221,14 @@ function regression(h){
         sxx+=i*i;
     }
 
-    return (n*sxy - sx*sy)/(n*sxx - sx*sx)*n + (sy - ((n*sxy - sx*sy)/(n*sxx - sx*sx))*sx)/n;
+    let slope=(n*sxy-sx*sy)/(n*sxx-sx*sx);
+    let intercept=(sy-slope*sx)/n;
+
+    return slope*n + intercept;
 }
 
 /* =========================
-   TREND
+   TREND + AI
 ========================= */
 function trend(h){
     let s=regression(h.slice(-10));
@@ -231,17 +239,11 @@ function trend(h){
     return "STABLE";
 }
 
-/* =========================
-   PUMP
-========================= */
 function pump(h){
     let avg=h.reduce((a,b)=>a+b.price,0)/h.length;
-    return h[h.length-1].price>avg*1.25;
+    return h[h.length-1].price > avg*1.25;
 }
 
-/* =========================
-   SCORE
-========================= */
 function score(item,h){
     let t=trend(h);
     let s=item.roi*0.5;
@@ -253,9 +255,6 @@ function score(item,h){
     return s;
 }
 
-/* =========================
-   SIGNAL
-========================= */
 function signal(item,h){
     let p=regression(h);
     let c=h[h.length-1].price;
@@ -267,9 +266,56 @@ function signal(item,h){
 }
 
 /* =========================
-   CHART UPDATE (NO RESET)
+   SEARCH SYSTEM
+========================= */
+function searchBazaar(){
+
+    let q=document.getElementById("search").value.toLowerCase();
+
+    if(!q){
+        renderAll(allMarketItems);
+        return;
+    }
+
+    filteredItems = allMarketItems.filter(i =>
+        i.name.toLowerCase().includes(q)
+    );
+
+    renderAll(filteredItems);
+}
+
+/* =========================
+   ALL ITEMS PANEL
+========================= */
+function renderAll(items){
+
+    let box=document.getElementById("allItems");
+    box.innerHTML="";
+
+    items.slice(0,200).forEach(i=>{
+
+        let div=document.createElement("div");
+        div.className="itemRow";
+
+        div.innerHTML=`
+            <b>${i.name}</b><br>
+            <small>${i.price.toFixed(1)} | ${i.roi.toFixed(2)}%</small>
+        `;
+
+        div.onclick=()=>{
+            document.getElementById("itemSelect").value=i.name;
+            updateCharts();
+        };
+
+        box.appendChild(div);
+    });
+}
+
+/* =========================
+   CHARTS (NO RESET)
 ========================= */
 function updateCharts(){
+
     let i=document.getElementById("itemSelect").value;
     let h=getHistory(i).slice(-50);
 
@@ -289,37 +335,17 @@ function updateCharts(){
 }
 
 /* =========================
-   ALL ITEMS
-========================= */
-function renderAll(items){
-    let box=document.getElementById("allItems");
-    box.innerHTML="";
-
-    items.forEach(i=>{
-        let div=document.createElement("div");
-        div.className="itemRow";
-
-        div.innerHTML=`<b>${i.name}</b><br><small>${i.price.toFixed(1)} | ${i.roi.toFixed(2)}%</small>`;
-
-        div.onclick=()=>{
-            document.getElementById("itemSelect").value=i.name;
-            updateCharts();
-        };
-
-        box.appendChild(div);
-    });
-}
-
-/* =========================
-   LOAD
+   LOAD MARKET
 ========================= */
 async function load(){
+
     let res=await fetch("https://api.hypixel.net/skyblock/bazaar");
     let data=await res.json();
 
     let items=[];
 
     for(let id in data.products){
+
         let s=data.products[id].quick_status;
 
         let buy=s.sellPrice;
@@ -348,23 +374,21 @@ async function load(){
     }
 
     allMarketItems=items.slice();
-    renderAll(allMarketItems);
 
-    let crash=items.reduce((a,i)=>a+i.roi,0)/items.length<-2;
+    renderAll(allMarketItems);
 
     items.sort((a,b)=>b.score-a.score);
     items=items.slice(0,15);
 
-    render(items,crash);
+    render(items);
 }
 
 /* =========================
-   RENDER TOP
+   RENDER TOP TABLE
 ========================= */
-function render(items,crash){
+function render(items){
 
-    document.getElementById("status").innerText=
-        crash?"🚨 MARKET CRASH":"🟢 LIVE";
+    document.getElementById("status").innerText="🟢 LIVE";
 
     document.getElementById("bestROI").innerText=
         items[0]?.roi.toFixed(2)+"%"||"-";
@@ -397,27 +421,15 @@ function render(items,crash){
         if(idx===0) updateCharts();
     });
 
-    document.getElementById("marketStatus").innerText=
-        crash?"CRASH":"STABLE";
+    document.getElementById("itemCount").innerText=items.length;
 }
 
 /* =========================
-   SEARCH
-========================= */
-document.getElementById("search").addEventListener("input",e=>{
-    let v=e.target.value.toLowerCase();
-
-    renderAll(allMarketItems.filter(i=>
-        i.name.toLowerCase().includes(v)
-    ));
-});
-
-/* =========================
-   LOOP (NO PAGE REFRESH)
+   LOOP (NO REFRESH)
 ========================= */
 async function loop(){
     await load();
-    setTimeout(loop,3000);
+    setTimeout(loop,4000);
 }
 
 loop();
