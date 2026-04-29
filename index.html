@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title> Personal Bazaar Trader</title>
+    <title>AI Bazaar Trader (GitHub Edition)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
@@ -18,21 +18,21 @@
 </head>
 <body>
 
-<h1>🤖 AI Bazaar Trader</h1>
+<h1>🤖 AI Bazaar Trader (GitHub)</h1>
 <h3 id="status">Loading...</h3>
 
 <select id="itemSelect" onchange="updateCharts()"></select>
 
-<h2>📊 Daily Trend</h2>
+<h2>📊 Daily Chart</h2>
 <canvas id="dayChart"></canvas>
 
-<h2>📈 7 Day Trend</h2>
+<h2>📈 7 Day Chart</h2>
 <canvas id="weekChart"></canvas>
 
 <table id="table">
 <tr>
-    <th>Item</th><th>Buy</th><th>Profit</th>
-    <th>ROI</th><th>Prediction</th><th>Signal</th>
+    <th>Item</th><th>Price</th><th>ROI</th>
+    <th>Prediction</th><th>Signal</th>
 </tr>
 </table>
 
@@ -42,14 +42,11 @@ const MIN_VOLUME = 100000;
 
 let dayChart, weekChart;
 
-/* ---------------- HISTORY STORAGE ---------------- */
+/* ---------------- HISTORY ---------------- */
 function saveHistory(item, price){
     let data = JSON.parse(localStorage.getItem(item) || "[]");
-
     data.push({ time: Date.now(), price });
-
-    if (data.length > 500) data.shift(); // ~7 days simulated
-
+    if (data.length > 500) data.shift();
     localStorage.setItem(item, JSON.stringify(data));
 }
 
@@ -57,33 +54,41 @@ function getHistory(item){
     return JSON.parse(localStorage.getItem(item) || "[]");
 }
 
-/* ---------------- PREDICTION ENGINE ---------------- */
-function predictTrend(history){
-    if (history.length < 10) return 0;
+/* ---------------- REGRESSION ---------------- */
+function regression(history){
+    if (history.length < 10) return null;
 
-    let momentum = 0;
+    let n = history.length;
+    let sx=0, sy=0, sxy=0, sxx=0;
 
-    for (let i = 1; i < history.length; i++){
-        momentum += history[i].price - history[i-1].price;
+    for(let i=0;i<n;i++){
+        let x=i;
+        let y=history[i].price;
+        sx+=x; sy+=y; sxy+=x*y; sxx+=x*x;
     }
 
-    return momentum / history.length;
+    let slope = (n*sxy - sx*sy)/(n*sxx - sx*sx);
+    let intercept = (sy - slope*sx)/n;
+
+    return slope*n + intercept;
 }
 
-function predictSignal(item, history){
-    const trend = predictTrend(history);
+/* ---------------- SIGNAL ---------------- */
+function getSignal(item, history){
+    const pred = regression(history);
+    if (!pred) return "WAIT";
 
-    if (trend > 0.5 && item.roi > 5) return "📈 RISING";
-    if (trend > 1.5) return "⚡ SPIKE SOON";
-    if (trend < -0.5) return "📉 FALLING";
+    const current = history[history.length-1].price;
 
-    return "➡️ STABLE";
-}
+    if (pred > current * 1.02 && item.roi > 5)
+        return "🟢 BUY EARLY";
 
-function aiSignal(item, prediction){
-    if (prediction.includes("SPIKE")) return "🟢 BUY EARLY";
-    if (prediction.includes("RISING") && item.roi > 10) return "🟢 BUY";
-    if (item.roi > 5) return "🟡 WAIT";
+    if (pred > current)
+        return "🟢 BUY";
+
+    if (item.roi > 5)
+        return "🟡 WAIT";
+
     return "❌ AVOID";
 }
 
@@ -99,25 +104,20 @@ function calc(stats){
 
     const roi = (profit / buy) * 100;
 
-    return { buy, profit, roi };
+    return { price: buy, roi };
 }
 
-/* ---------------- CHARTS ---------------- */
-function drawChart(canvasId, history, label){
+/* ---------------- CHART ---------------- */
+function drawChart(canvasId, history){
     if (!history.length) return;
 
-    const labels = history.map(x => new Date(x.time).toLocaleTimeString());
-    const data = history.map(x => x.price);
-
     return new Chart(document.getElementById(canvasId), {
-        type: "line",
-        data: {
-            labels,
-            datasets: [{
-                label,
-                data,
-                borderColor: "#00ff99",
-                fill: false
+        type:"line",
+        data:{
+            labels:history.map(x=>new Date(x.time).toLocaleTimeString()),
+            datasets:[{
+                data:history.map(x=>x.price),
+                borderColor:"#00ff99"
             }]
         }
     });
@@ -127,53 +127,56 @@ function updateCharts(){
     const item = document.getElementById("itemSelect").value;
     const history = getHistory(item);
 
-    const day = history.slice(-50);   // ~daily
-    const week = history;            // full stored
-
     if(dayChart) dayChart.destroy();
     if(weekChart) weekChart.destroy();
 
-    dayChart = drawChart("dayChart", day, "24h");
-    weekChart = drawChart("weekChart", week, "7 days");
+    dayChart = drawChart("dayChart", history.slice(-50));
+    weekChart = drawChart("weekChart", history);
 }
 
 /* ---------------- MAIN LOAD ---------------- */
 async function load(){
     document.getElementById("status").innerText = "Fetching Bazaar...";
 
-    const res = await fetch("https://api.hypixel.net/skyblock/bazaar");
-    const data = await res.json();
+    try{
+        const res = await fetch("https://api.hypixel.net/skyblock/bazaar");
+        const data = await res.json();
 
-    let results = [];
+        let results = [];
 
-    for (const id in data.products){
-        const stats = data.products[id].quick_status;
+        for (const id in data.products){
+            const stats = data.products[id].quick_status;
 
-        if (stats.sellMovingWeek < MIN_VOLUME) continue;
+            if (stats.sellMovingWeek < MIN_VOLUME) continue;
 
-        const flip = calc(stats);
-        if (!flip) continue;
+            const flip = calc(stats);
+            if (!flip) continue;
 
-        const name = id.replaceAll("_"," ");
+            const name = id.replaceAll("_"," ");
 
-        saveHistory(name, flip.buy);
+            saveHistory(name, flip.price);
 
-        const history = getHistory(name);
-        const prediction = predictSignal(flip, history);
-        const signal = aiSignal(flip, prediction);
+            const history = getHistory(name);
+            const signal = getSignal(flip, history);
 
-        results.push({
-            name,
-            ...flip,
-            prediction,
-            signal
-        });
+            results.push({
+                name,
+                ...flip,
+                signal
+            });
+        }
+
+        results.sort((a,b)=>b.roi-a.roi);
+        results = results.slice(0, 15);
+
+        render(results);
+
+        document.getElementById("status").innerText =
+            "Updated: " + new Date().toLocaleTimeString();
+
+    }catch(e){
+        document.getElementById("status").innerText = "API Error";
     }
-
-    results.sort((a,b)=>b.roi-a.roi);
-    results = results.slice(0, 15);
-
-    render(results);
 }
 
 /* ---------------- RENDER ---------------- */
@@ -183,47 +186,42 @@ function render(items){
 
     table.innerHTML = `
         <tr>
-            <th>Item</th><th>Buy</th><th>Profit</th>
-            <th>ROI</th><th>Prediction</th><th>Signal</th>
+            <th>Item</th><th>Price</th><th>ROI</th>
+            <th>Signal</th>
         </tr>
     `;
 
     select.innerHTML = "";
 
-    items.forEach((item, i)=>{
-        const row = document.createElement("tr");
+    items.forEach((item,i)=>{
 
-        row.innerHTML = `
-            <td>${item.name}</td>
-            <td>${item.buy.toFixed(1)}</td>
-            <td>${item.profit.toFixed(1)}</td>
-            <td>${item.roi.toFixed(2)}</td>
-            <td>${item.prediction}</td>
-            <td class="${item.signal.includes('BUY')?'buy':item.signal.includes('WAIT')?'wait':'avoid'}">
-                ${item.signal}
-            </td>
+        table.innerHTML += `
+            <tr>
+                <td>${item.name}</td>
+                <td>${item.price.toFixed(1)}</td>
+                <td>${item.roi.toFixed(2)}</td>
+                <td class="${item.signal.includes('BUY')?'buy':item.signal.includes('WAIT')?'wait':'avoid'}">
+                    ${item.signal}
+                </td>
+            </tr>
         `;
-
-        table.appendChild(row);
 
         const opt = document.createElement("option");
         opt.value = item.name;
         opt.text = item.name;
         select.appendChild(opt);
 
-        if(i === 0){
-            updateCharts();
-        }
+        if(i===0) updateCharts();
     });
-
-    document.getElementById("status").innerText =
-        "Updated: " + new Date().toLocaleTimeString();
 }
 
-/* ---------------- LOOP ---------------- */
-load();
-setInterval(load, 10000);
+/* ⚡ FAST LOOP (GitHub safe) */
+async function loop(){
+    await load();
+    setTimeout(loop, 3000); // fastest safe polling
+}
 
+loop();
 </script>
 
 </body>
