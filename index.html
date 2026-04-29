@@ -1,10 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pro Bazaar Trading Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{
+    font-family: Arial;
+    background:#0b0f14;
+    color:#e6e6e6;
+    margin:0;
+}
+
+/* HEADER */
+.header{
+    padding:15px;
+    background:#111827;
+    border-bottom:1px solid #222;
+}
+
+/* LAYOUT */
+.container{
+    display:grid;
+    grid-template-columns:260px 1fr;
+    height:100vh;
+}
+
+/* SIDEBAR */
+.sidebar{
+    background:#0f172a;
+    padding:10px;
+    border-right:1px solid #222;
+}
+
+.sidebar select{
+    width:100%;
+    padding:8px;
+    background:#111827;
+    color:white;
+    border:none;
+}
+
+/* MAIN */
+.main{
+    padding:15px;
+}
+
+/* CARDS */
+.kpis{
+    display:flex;
+    gap:10px;
+    margin-bottom:10px;
+}
+
+.card{
+    flex:1;
+    background:#111827;
+    padding:10px;
+    border-radius:8px;
+    border:1px solid #222;
+}
+
+.card h3{
+    margin:0;
+    font-size:12px;
+    color:#9ca3af;
+}
+
+.card p{
+    margin:5px 0 0;
+    font-size:16px;
+}
+
+/* BEST TRADE */
+.best{
+    background:#111827;
+    padding:10px;
+    border-left:4px solid #00ff88;
+    margin-bottom:10px;
+}
+
+/* TABLE */
+table{
+    width:100%;
+    border-collapse:collapse;
+    background:#0f172a;
+}
+
+th,td{
+    padding:8px;
+    border-bottom:1px solid #222;
+    text-align:center;
+}
+
+th{
+    background:#111827;
+}
+
+/* COLORS */
+.buy{ color:#00ff88; font-weight:bold; }
+.wait{ color:#ffcc00; }
+.avoid{ color:#ff4444; }
+
+canvas{
+    margin-top:10px;
+    background:#0f172a;
+    border-radius:8px;
+    padding:10px;
+}
+</style>
+
+</head>
+
+<body>
+
+<div class="header">
+    <h2>🤖 Pro Bazaar Trading Dashboard</h2>
+    <span id="status">Loading...</span>
+</div>
+
+<div class="container">
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+    <h3>Items</h3>
+    <select id="itemSelect" onchange="updateCharts()"></select>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+    <div class="kpis">
+        <div class="card">
+            <h3>🔥 Best ROI</h3>
+            <p id="bestROI">-</p>
+        </div>
+
+        <div class="card">
+            <h3>📉 Market</h3>
+            <p id="marketStatus">-</p>
+        </div>
+
+        <div class="card">
+            <h3>⚡ Trades</h3>
+            <p id="tradeCount">0</p>
+        </div>
+    </div>
+
+    <div class="best" id="bestTrade">Loading...</div>
+
+    <h3>📊 24H Trend</h3>
+    <canvas id="dayChart"></canvas>
+
+    <h3>📈 7 Day Trend</h3>
+    <canvas id="weekChart"></canvas>
+
+    <table id="table"></table>
+
+</div>
+</div>
+
 <script>
 
 const TAX = 0.01125;
+
 let dayChart, weekChart;
 
 /* =========================
-   💾 HISTORY SYSTEM
+   HISTORY SYSTEM
 ========================= */
 function saveHistory(item, price){
     let data = JSON.parse(localStorage.getItem(item) || "[]");
@@ -18,257 +181,236 @@ function getHistory(item){
 }
 
 /* =========================
-   🥇 WIN / LOSS TRACKING
+   WIN / LOSS TRACKING
 ========================= */
-function getTradeStats(item){
-    let data = JSON.parse(localStorage.getItem("trades_" + item) || "{}");
-    return {
-        wins: data.wins || 0,
-        losses: data.losses || 0
-    };
-}
-
-function logTrade(item, entryPrice){
-    let key = "trades_" + item;
-    let data = JSON.parse(localStorage.getItem(key) || "{}");
-
-    if(!data.wins) data.wins = 0;
-    if(!data.losses) data.losses = 0;
+function trackTrade(item, entry){
+    let key = "trade_" + item;
+    let data = JSON.parse(localStorage.getItem(key) || '{"wins":0,"losses":0}');
 
     setTimeout(()=>{
-        const history = getHistory(item);
-        const current = history[history.length - 1]?.price;
+        const h = getHistory(item);
+        const now = h[h.length-1]?.price;
 
-        if(!current) return;
+        if(!now) return;
 
-        if(current > entryPrice){
-            data.wins++;
-        } else {
-            data.losses++;
-        }
+        if(now > entry) data.wins++;
+        else data.losses++;
 
         localStorage.setItem(key, JSON.stringify(data));
-    }, 60000); // 1 min evaluation
+
+        document.getElementById("tradeCount").innerText =
+            data.wins + data.losses;
+
+    }, 60000);
 }
 
 /* =========================
-   📉 REGRESSION MODEL
+   REGRESSION
 ========================= */
 function regression(history){
-    if (history.length < 10) return null;
+    if(history.length < 10) return null;
 
-    let n = history.length;
-    let sx=0, sy=0, sxy=0, sxx=0;
+    let n=history.length, sx=0,sy=0,sxy=0,sxx=0;
 
     for(let i=0;i<n;i++){
-        let x=i, y=history[i].price;
+        let x=i,y=history[i].price;
         sx+=x; sy+=y; sxy+=x*y; sxx+=x*x;
     }
 
-    let slope = (n*sxy - sx*sy)/(n*sxx - sx*sx);
-    let intercept = (sy - slope*sx)/n;
+    let slope=(n*sxy-sx*sy)/(n*sxx-sx*sx);
+    let intercept=(sy-slope*sx)/n;
 
     return slope*n + intercept;
 }
 
 /* =========================
-   🥉 SHORT vs LONG TREND
+   TREND (SHORT vs LONG)
 ========================= */
-function trendSignal(history){
+function trend(history){
     const short = regression(history.slice(-10));
     const long = regression(history.slice(-50));
 
-    if(!short || !long) return "STABLE";
-
-    if(short > long * 1.01) return "MOMENTUM_UP";
-    if(short < long * 0.99) return "DUMPING";
+    if(short > long*1.01) return "UP";
+    if(short < long*0.99) return "DOWN";
     return "STABLE";
 }
 
 /* =========================
-   🥈 MARKET CRASH DETECTOR
+   MARKET CRASH
 ========================= */
-function marketCrash(items){
-    let avgROI = items.reduce((a,i)=>a+i.roi,0)/items.length;
-    return avgROI < -2;
+function crash(items){
+    let avg = items.reduce((a,i)=>a+i.roi,0)/items.length;
+    return avg < -2;
 }
 
 /* =========================
-   📉 PUMP DETECTION
+   PUMP DETECTION
 ========================= */
-function detectPump(history){
-    if (history.length < 10) return false;
-
-    const last = history[history.length-1].price;
-    const avg = history.reduce((a,b)=>a+b.price,0)/history.length;
-
-    return last > avg * 1.25;
-}
-
-/* =========================
-   📊 VOLATILITY
-========================= */
-function volatility(history){
+function pump(history){
     let avg = history.reduce((a,b)=>a+b.price,0)/history.length;
-
-    let variance = history.reduce((a,p)=>
-        a + Math.pow(p.price-avg,2),0)/history.length;
-
-    return Math.sqrt(variance);
+    return history[history.length-1].price > avg*1.25;
 }
 
 /* =========================
-   📈 SMART SCORE
+   SCORE
 ========================= */
 function score(item, history){
-    const trend = trendSignal(history);
-    const vol = volatility(history);
+    let t = trend(history);
+    let s = item.roi * 0.5;
 
-    let s = 0;
-
-    s += item.roi * 0.5;
-
-    if(trend === "MOMENTUM_UP") s += 25;
-    if(trend === "DUMPING") s -= 30;
-
-    if(vol < item.price * 0.05) s += 10;
-
-    if(detectPump(history)) s -= 50;
+    if(t==="UP") s+=20;
+    if(t==="DOWN") s-=30;
+    if(pump(history)) s-=50;
 
     return s;
 }
 
 /* =========================
-   🤖 SIGNAL ENGINE (UPDATED)
+   SIGNAL
 ========================= */
 function signal(item, history){
-    const pred = regression(history);
-    const current = history[history.length-1].price;
-    const trend = trendSignal(history);
+    let pred = regression(history);
+    let current = history[history.length-1].price;
 
-    if(detectPump(history)) return "❌ MANIPULATION";
-    if(trend === "DUMPING") return "❌ DUMPING MARKET";
+    if(pump(history)) return "❌ MANIPULATION";
 
-    if(pred && pred > current * 1.02 && item.roi > 5){
-        logTrade(item.name, current); // 🥇 LOG TRADE
+    if(pred && pred > current*1.02){
+        trackTrade(item.name,current);
         return "🟢 BUY EARLY";
     }
 
-    if(pred && pred > current)
-        return "🟢 BUY";
-
-    if(item.roi > 5)
-        return "🟡 WAIT";
+    if(item.roi > 5) return "🟡 WAIT";
 
     return "❌ AVOID";
 }
 
 /* =========================
-   🚀 MAIN LOOP
+   CHARTS
 ========================= */
-async function load(){
-    document.getElementById("status").innerText = "Fetching...";
+function draw(id, h){
+    if(!h.length) return;
 
-    const res = await fetch("https://api.hypixel.net/skyblock/bazaar");
-    const data = await res.json();
-
-    let items = [];
-
-    for (const id in data.products){
-        const stats = data.products[id].quick_status;
-
-        const buy = stats.sellPrice;
-        const sell = stats.buyPrice;
-
-        if (buy <= 0 || sell <= 0) continue;
-
-        const profit = (sell - buy) - (sell * TAX);
-        const roi = (profit / buy) * 100;
-
-        if (stats.sellMovingWeek < 100000) continue;
-
-        const name = id.replaceAll("_"," ");
-
-        saveHistory(name, buy);
-
-        const history = getHistory(name);
-
-        const sc = score({ roi, price: buy }, history);
-        const sig = signal({ name, roi }, history);
-
-        items.push({
-            name,
-            price: buy,
-            roi,
-            score: sc,
-            signal: sig
-        });
-    }
-
-    /* 🥈 MARKET CRASH CHECK */
-    const crash = marketCrash(items);
-
-    items.sort((a,b)=>b.score-a.score);
-    items = items.slice(0, 15);
-
-    render(items);
-
-    document.getElementById("status").innerText =
-        crash
-        ? "🚨 MARKET CRASH DETECTED"
-        : "Updated " + new Date().toLocaleTimeString();
-}
-
-/* =========================
-   🧾 RENDER
-========================= */
-function render(items){
-    const table = document.getElementById("table");
-    const select = document.getElementById("itemSelect");
-
-    table.innerHTML = `
-        <tr>
-            <th>Item</th>
-            <th>Price</th>
-            <th>ROI</th>
-            <th>Score</th>
-            <th>Signal</th>
-        </tr>
-    `;
-
-    select.innerHTML = "";
-
-    items.forEach((i,idx)=>{
-
-        table.innerHTML += `
-            <tr>
-                <td>${i.name}</td>
-                <td>${i.price.toFixed(1)}</td>
-                <td>${i.roi.toFixed(2)}</td>
-                <td>${i.score.toFixed(1)}</td>
-                <td class="${i.signal.includes('BUY')?'buy':i.signal.includes('WAIT')?'wait':'avoid'}">
-                    ${i.signal}
-                </td>
-            </tr>
-        `;
-
-        const opt = document.createElement("option");
-        opt.value = i.name;
-        opt.text = i.name;
-        select.appendChild(opt);
-
-        if(idx === 0) updateCharts();
+    return new Chart(document.getElementById(id),{
+        type:"line",
+        data:{
+            labels:h.map(x=>new Date(x.time).toLocaleTimeString()),
+            datasets:[{data:h.map(x=>x.price),borderColor:"#00ff99"}]
+        }
     });
 }
 
+function updateCharts(){
+    let i=document.getElementById("itemSelect").value;
+    let h=getHistory(i);
+
+    if(dayChart) dayChart.destroy();
+    if(weekChart) weekChart.destroy();
+
+    dayChart=draw("dayChart",h.slice(-50));
+    weekChart=draw("weekChart",h);
+}
+
 /* =========================
-   ⚡ LOOP
+   MAIN LOOP
+========================= */
+async function load(){
+    const res=await fetch("https://api.hypixel.net/skyblock/bazaar");
+    const data=await res.json();
+
+    let items=[];
+
+    for(let id in data.products){
+        let s=data.products[id].quick_status;
+
+        let buy=s.sellPrice;
+        let sell=s.buyPrice;
+
+        if(buy<=0||sell<=0)continue;
+
+        let profit=(sell-buy)-(sell*TAX);
+        let roi=(profit/buy)*100;
+
+        if(s.sellMovingWeek<100000)continue;
+
+        let name=id.replaceAll("_"," ");
+
+        saveHistory(name,buy);
+
+        let h=getHistory(name);
+
+        items.push({
+            name,
+            price:buy,
+            roi,
+            score:score({roi},h),
+            signal:signal({name,roi},h)
+        });
+    }
+
+    let marketCrash=crash(items);
+
+    items.sort((a,b)=>b.score-a.score);
+    items=items.slice(0,15);
+
+    render(items,marketCrash);
+}
+
+/* =========================
+   RENDER UI
+========================= */
+function render(items,crash){
+
+    document.getElementById("status").innerText=
+        crash?"🚨 MARKET CRASH":"🟢 LIVE";
+
+    document.getElementById("bestROI").innerText=
+        items[0]?.roi.toFixed(2)+"%"||"-";
+
+    document.getElementById("bestTrade").innerHTML=
+        "🔥 BEST: <b>"+items[0]?.name+"</b>";
+
+    let table=document.getElementById("table");
+    let select=document.getElementById("itemSelect");
+
+    table.innerHTML=`<tr><th>Item</th><th>Price</th><th>ROI</th><th>Score</th><th>Signal</th></tr>`;
+    select.innerHTML="";
+
+    items.forEach((i,idx)=>{
+
+        table.innerHTML+=`
+        <tr>
+            <td>${i.name}</td>
+            <td>${i.price.toFixed(1)}</td>
+            <td>${i.roi.toFixed(2)}</td>
+            <td>${i.score.toFixed(1)}</td>
+            <td class="${i.signal.includes('BUY')?'buy':i.signal.includes('WAIT')?'wait':'avoid'}">
+                ${i.signal}
+            </td>
+        </tr>`;
+
+        let opt=document.createElement("option");
+        opt.value=i.name;
+        opt.text=i.name;
+        select.appendChild(opt);
+
+        if(idx===0) updateCharts();
+    });
+
+    document.getElementById("marketStatus").innerText=
+        crash?"CRASH":"STABLE";
+}
+
+/* =========================
+   LOOP
 ========================= */
 async function loop(){
     await load();
-    setTimeout(loop, 3000);
+    setTimeout(loop,3000);
 }
 
 loop();
 
 </script>
+
+</body>
+</html>
