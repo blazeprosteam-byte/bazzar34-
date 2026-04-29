@@ -275,6 +275,48 @@ socket.on("marketUpdate", (data) => {
         }
     });
 });
+
+    function calculateFlip(stats) {
+    const buyPrice = stats.sellPrice;   // instant buy from bazaar sell orders
+    const sellPrice = stats.buyPrice;   // instant sell into buy orders
+
+    const buyVolume = stats.buyMovingWeek || 1;
+    const sellVolume = stats.sellMovingWeek || 1;
+
+    // spread between buy and sell
+    const spread = sellPrice - buyPrice;
+
+    // fees (auction/bazaar tax)
+    const tax = sellPrice * 0.01125;
+
+    // liquidity weighting (prevents dead items)
+    const liquidityScore = Math.log10(buyVolume + sellVolume);
+
+    // real profit after tax
+    const netProfit = spread - tax;
+
+    // market pressure balance (buy vs sell demand)
+    const demandBalance = buyVolume / (sellVolume + 1);
+
+    // FINAL ROI (smarter than basic ROI)
+    const roi = (netProfit / buyPrice) * 100;
+
+    // confidence score (filters manipulation / bad flips)
+    const confidence =
+        (spread > 0 ? 30 : -30) +
+        (demandBalance > 1 ? 20 : -10) +
+        (liquidityScore * 5) +
+        (roi > 10 ? 20 : -10);
+
+    return {
+        buyPrice,
+        sellPrice,
+        spread,
+        netProfit,
+        roi,
+        confidence
+    };
+}
 </script>
 
 </body>
