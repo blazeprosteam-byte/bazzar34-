@@ -105,23 +105,19 @@ canvas{
     padding:10px;
 }
 
-/* ALL ITEMS PANEL */
-#allItems{
-    max-height:300px;
-    overflow:auto;
-    background:#0f172a;
-    border:1px solid #222;
-    border-radius:8px;
-}
-
 .itemRow{
     padding:8px;
     border-bottom:1px solid #222;
     cursor:pointer;
 }
+.itemRow:hover{ background:#111827; }
 
-.itemRow:hover{
-    background:#111827;
+#allItems{
+    max-height:250px;
+    overflow:auto;
+    background:#0f172a;
+    border:1px solid #222;
+    border-radius:8px;
 }
 </style>
 
@@ -139,7 +135,7 @@ canvas{
 <!-- SIDEBAR -->
 <div class="sidebar">
 
-    <h3>🎯 Selected Item</h3>
+    <h3>🎯 Item</h3>
     <select id="itemSelect" onchange="updateCharts()"></select>
 
     <h3>🔍 Search</h3>
@@ -208,33 +204,30 @@ function getHistory(item){
 /* =========================
    REGRESSION
 ========================= */
-function regression(history){
-    if(history.length < 10) return null;
+function regression(h){
+    if(h.length < 10) return null;
 
-    let n=history.length, sx=0,sy=0,sxy=0,sxx=0;
+    let n=h.length,sx=0,sy=0,sxy=0,sxx=0;
 
     for(let i=0;i<n;i++){
         sx+=i;
-        sy+=history[i].price;
-        sxy+=i*history[i].price;
+        sy+=h[i].price;
+        sxy+=i*h[i].price;
         sxx+=i*i;
     }
 
-    let slope=(n*sxy-sx*sy)/(n*sxx-sx*sx);
-    let intercept=(sy-slope*sx)/n;
-
-    return slope*n + intercept;
+    return (n*sxy - sx*sy)/(n*sxx - sx*sx)*n + (sy - ((n*sxy - sx*sy)/(n*sxx - sx*sx))*sx)/n;
 }
 
 /* =========================
    TREND
 ========================= */
 function trend(h){
-    const s = regression(h.slice(-10));
-    const l = regression(h.slice(-50));
+    let s=regression(h.slice(-10));
+    let l=regression(h.slice(-50));
 
-    if(s > l*1.01) return "UP";
-    if(s < l*0.99) return "DOWN";
+    if(s>l*1.01) return "UP";
+    if(s<l*0.99) return "DOWN";
     return "STABLE";
 }
 
@@ -242,16 +235,16 @@ function trend(h){
    PUMP
 ========================= */
 function pump(h){
-    let avg = h.reduce((a,b)=>a+b.price,0)/h.length;
-    return h[h.length-1].price > avg*1.25;
+    let avg=h.reduce((a,b)=>a+b.price,0)/h.length;
+    return h[h.length-1].price>avg*1.25;
 }
 
 /* =========================
    SCORE
 ========================= */
 function score(item,h){
-    let t = trend(h);
-    let s = item.roi*0.5;
+    let t=trend(h);
+    let s=item.roi*0.5;
 
     if(t==="UP") s+=20;
     if(t==="DOWN") s-=30;
@@ -264,62 +257,49 @@ function score(item,h){
    SIGNAL
 ========================= */
 function signal(item,h){
-    let p = regression(h);
-    let c = h[h.length-1].price;
+    let p=regression(h);
+    let c=h[h.length-1].price;
 
     if(pump(h)) return "❌ MANIPULATION";
-
-    if(p && p > c*1.02) return "🟢 BUY EARLY";
-    if(item.roi > 5) return "🟡 WAIT";
-
+    if(p && p>c*1.02) return "🟢 BUY EARLY";
+    if(item.roi>5) return "🟡 WAIT";
     return "❌ AVOID";
 }
 
 /* =========================
-   CHARTS
+   CHART UPDATE (NO RESET)
 ========================= */
-function draw(id,h){
-    if(!h.length) return;
-
-    return new Chart(document.getElementById(id),{
-        type:"line",
-        data:{
-            labels:h.map(x=>new Date(x.time).toLocaleTimeString()),
-            datasets:[{
-                data:h.map(x=>x.price),
-                borderColor:"#00ff99",
-                fill:false
-            }]
-        }
-    });
-}
-
 function updateCharts(){
     let i=document.getElementById("itemSelect").value;
-    let h=getHistory(i);
+    let h=getHistory(i).slice(-50);
 
-    if(dayChart) dayChart.destroy();
-    if(weekChart) weekChart.destroy();
+    let labels=h.map(x=>new Date(x.time).toLocaleTimeString());
+    let data=h.map(x=>x.price);
 
-    dayChart=draw("dayChart",h.slice(-50));
-    weekChart=draw("weekChart",h);
+    if(!dayChart){
+        dayChart=new Chart(document.getElementById("dayChart"),{
+            type:"line",
+            data:{labels,datasets:[{data,borderColor:"#00ff99"}]}
+        });
+    } else {
+        dayChart.data.labels=labels;
+        dayChart.data.datasets[0].data=data;
+        dayChart.update();
+    }
 }
 
 /* =========================
-   ALL ITEMS UI
+   ALL ITEMS
 ========================= */
 function renderAll(items){
-    const box=document.getElementById("allItems");
+    let box=document.getElementById("allItems");
     box.innerHTML="";
 
     items.forEach(i=>{
         let div=document.createElement("div");
         div.className="itemRow";
 
-        div.innerHTML=`
-            <b>${i.name}</b><br>
-            <small>${i.price.toFixed(1)} | ${i.roi.toFixed(2)}%</small>
-        `;
+        div.innerHTML=`<b>${i.name}</b><br><small>${i.price.toFixed(1)} | ${i.roi.toFixed(2)}%</small>`;
 
         div.onclick=()=>{
             document.getElementById("itemSelect").value=i.name;
@@ -334,8 +314,8 @@ function renderAll(items){
    LOAD
 ========================= */
 async function load(){
-    const res=await fetch("https://api.hypixel.net/skyblock/bazaar");
-    const data=await res.json();
+    let res=await fetch("https://api.hypixel.net/skyblock/bazaar");
+    let data=await res.json();
 
     let items=[];
 
@@ -367,11 +347,10 @@ async function load(){
         });
     }
 
-    allMarketItems = items.slice();
-
+    allMarketItems=items.slice();
     renderAll(allMarketItems);
 
-    let crash = items.reduce((a,i)=>a+i.roi,0)/items.length < -2;
+    let crash=items.reduce((a,i)=>a+i.roi,0)/items.length<-2;
 
     items.sort((a,b)=>b.score-a.score);
     items=items.slice(0,15);
@@ -384,13 +363,13 @@ async function load(){
 ========================= */
 function render(items,crash){
 
-    document.getElementById("status").innerText =
-        crash ? "🚨 MARKET CRASH" : "🟢 LIVE";
+    document.getElementById("status").innerText=
+        crash?"🚨 MARKET CRASH":"🟢 LIVE";
 
-    document.getElementById("bestROI").innerText =
+    document.getElementById("bestROI").innerText=
         items[0]?.roi.toFixed(2)+"%"||"-";
 
-    document.getElementById("bestTrade").innerHTML =
+    document.getElementById("bestTrade").innerHTML=
         "🔥 BEST: <b>"+items[0]?.name+"</b>";
 
     let table=document.getElementById("table");
@@ -418,8 +397,8 @@ function render(items,crash){
         if(idx===0) updateCharts();
     });
 
-    document.getElementById("marketStatus").innerText =
-        crash ? "CRASH" : "STABLE";
+    document.getElementById("marketStatus").innerText=
+        crash?"CRASH":"STABLE";
 }
 
 /* =========================
@@ -428,13 +407,13 @@ function render(items,crash){
 document.getElementById("search").addEventListener("input",e=>{
     let v=e.target.value.toLowerCase();
 
-    renderAll(
-        allMarketItems.filter(i=>i.name.toLowerCase().includes(v))
-    );
+    renderAll(allMarketItems.filter(i=>
+        i.name.toLowerCase().includes(v)
+    ));
 });
 
 /* =========================
-   LOOP
+   LOOP (NO PAGE REFRESH)
 ========================= */
 async function loop(){
     await load();
