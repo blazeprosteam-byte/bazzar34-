@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html><!DOCTYPE html>
 <html>
 <head>
     <title>Pro Bazaar Trading Terminal</title>
@@ -31,7 +31,6 @@ body{
     border-right:1px solid #222;
 }
 
-.sidebar input,
 .sidebar select{
     width:100%;
     padding:8px;
@@ -73,22 +72,24 @@ canvas{
     padding:10px;
 }
 
-.itemRow{
-    padding:8px;
-    border-bottom:1px solid #222;
-    cursor:pointer;
-}
-
-.itemRow:hover{
+.featured{
+    padding:10px;
+    margin-bottom:10px;
     background:#111827;
+    border-left:4px solid #00ff88;
 }
 
-#allItems{
-    max-height:260px;
-    overflow:auto;
-    border:1px solid #222;
-    border-radius:8px;
+.featured h3{
+    margin:0;
+    font-size:14px;
+    color:#9ca3af;
+}
+
+.featured-item{
+    margin-top:6px;
+    padding:6px;
     background:#0f172a;
+    border-radius:6px;
 }
 </style>
 
@@ -106,14 +107,17 @@ canvas{
 <!-- SIDEBAR -->
 <div class="sidebar">
 
-    <h3>🔍 Search Bazaar</h3>
-    <input id="search" placeholder="Search item..." oninput="searchBazaar()">
-
     <h3>🎯 Select Item</h3>
     <select id="itemSelect" onchange="updateCharts()"></select>
 
-    <h3>📦 All Items</h3>
-    <div id="allItems"></div>
+    <!-- FIXED FEATURED ITEMS -->
+    <div class="featured">
+        <h3>🔥 Featured Stable Items</h3>
+
+        <div class="featured-item">🟣 Recombobulator 3000</div>
+        <div class="featured-item">🍪 Booster Cookie</div>
+
+    </div>
 
 </div>
 
@@ -123,7 +127,7 @@ canvas{
     <h3>📊 24H Trend</h3>
     <canvas id="dayChart"></canvas>
 
-    <h3>📊 Top AI Trades</h3>
+    <h3>📊 Top AI Bazaar Flips</h3>
     <table id="table"></table>
 
 </div>
@@ -226,48 +230,6 @@ function signal(item,h){
 }
 
 /* =========================
-   SEARCH
-========================= */
-function searchBazaar(){
-    let q=document.getElementById("search").value.toLowerCase();
-
-    if(!q){
-        renderAll(allMarketItems);
-        return;
-    }
-
-    let filtered = allMarketItems.filter(i =>
-        i.name.toLowerCase().includes(q)
-    );
-
-    renderAll(filtered);
-}
-
-/* =========================
-   ALL ITEMS
-========================= */
-function renderAll(items){
-
-    let box=document.getElementById("allItems");
-    box.innerHTML="";
-
-    items.slice(0,200).forEach(i=>{
-
-        let div=document.createElement("div");
-        div.className="itemRow";
-
-        div.innerHTML=`<b>${i.name}</b><br><small>${i.price.toFixed(1)} | ${i.roi.toFixed(2)}%</small>`;
-
-        div.onclick=()=>{
-            document.getElementById("itemSelect").value=i.name;
-            updateCharts();
-        };
-
-        box.appendChild(div);
-    });
-}
-
-/* =========================
    CHART
 ========================= */
 function updateCharts(){
@@ -338,8 +300,6 @@ async function load(){
 
         allMarketItems = items.slice();
 
-        renderAll(allMarketItems);
-
         items.sort((a,b)=>b.score-a.score);
         items=items.slice(0,15);
 
@@ -384,11 +344,11 @@ function render(items){
 }
 
 /* =========================
-   🚀 STABLE LOOP (5 SECONDS)
+   LOOP (5 SEC STABLE)
 ========================= */
 async function loop(){
     await load();
-    setTimeout(loop, 5000); // ✅ FIXED
+    setTimeout(loop, 5000);
 }
 
 loop();
