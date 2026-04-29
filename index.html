@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pro Bazaar Trading Dashboard</title>
+    <title>Pro Bazaar Trading Terminal</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
@@ -12,17 +12,15 @@ body{
     margin:0;
 }
 
-/* HEADER */
 .header{
     padding:15px;
     background:#111827;
     border-bottom:1px solid #222;
 }
 
-/* LAYOUT */
 .container{
     display:grid;
-    grid-template-columns:260px 1fr;
+    grid-template-columns:280px 1fr;
     height:100vh;
 }
 
@@ -33,12 +31,14 @@ body{
     border-right:1px solid #222;
 }
 
-.sidebar select{
+.sidebar select,
+.sidebar input{
     width:100%;
     padding:8px;
     background:#111827;
     color:white;
     border:none;
+    margin-bottom:8px;
 }
 
 /* MAIN */
@@ -46,7 +46,6 @@ body{
     padding:15px;
 }
 
-/* CARDS */
 .kpis{
     display:flex;
     gap:10px;
@@ -72,7 +71,6 @@ body{
     font-size:16px;
 }
 
-/* BEST TRADE */
 .best{
     background:#111827;
     padding:10px;
@@ -80,7 +78,6 @@ body{
     margin-bottom:10px;
 }
 
-/* TABLE */
 table{
     width:100%;
     border-collapse:collapse;
@@ -97,7 +94,6 @@ th{
     background:#111827;
 }
 
-/* COLORS */
 .buy{ color:#00ff88; font-weight:bold; }
 .wait{ color:#ffcc00; }
 .avoid{ color:#ff4444; }
@@ -108,6 +104,25 @@ canvas{
     border-radius:8px;
     padding:10px;
 }
+
+/* ALL ITEMS PANEL */
+#allItems{
+    max-height:300px;
+    overflow:auto;
+    background:#0f172a;
+    border:1px solid #222;
+    border-radius:8px;
+}
+
+.itemRow{
+    padding:8px;
+    border-bottom:1px solid #222;
+    cursor:pointer;
+}
+
+.itemRow:hover{
+    background:#111827;
+}
 </style>
 
 </head>
@@ -115,7 +130,7 @@ canvas{
 <body>
 
 <div class="header">
-    <h2>🤖 Pro Bazaar Trading Dashboard</h2>
+    <h2>🤖 Pro Bazaar Trading Terminal</h2>
     <span id="status">Loading...</span>
 </div>
 
@@ -123,8 +138,16 @@ canvas{
 
 <!-- SIDEBAR -->
 <div class="sidebar">
-    <h3>Items</h3>
+
+    <h3>🎯 Selected Item</h3>
     <select id="itemSelect" onchange="updateCharts()"></select>
+
+    <h3>🔍 Search</h3>
+    <input id="search" placeholder="Search item...">
+
+    <h3>📦 All Items</h3>
+    <div id="allItems"></div>
+
 </div>
 
 <!-- MAIN -->
@@ -155,6 +178,7 @@ canvas{
     <h3>📈 7 Day Trend</h3>
     <canvas id="weekChart"></canvas>
 
+    <h3>📊 Top AI Trades</h3>
     <table id="table"></table>
 
 </div>
@@ -165,9 +189,10 @@ canvas{
 const TAX = 0.01125;
 
 let dayChart, weekChart;
+let allMarketItems = [];
 
 /* =========================
-   HISTORY SYSTEM
+   HISTORY
 ========================= */
 function saveHistory(item, price){
     let data = JSON.parse(localStorage.getItem(item) || "[]");
@@ -181,30 +206,6 @@ function getHistory(item){
 }
 
 /* =========================
-   WIN / LOSS TRACKING
-========================= */
-function trackTrade(item, entry){
-    let key = "trade_" + item;
-    let data = JSON.parse(localStorage.getItem(key) || '{"wins":0,"losses":0}');
-
-    setTimeout(()=>{
-        const h = getHistory(item);
-        const now = h[h.length-1]?.price;
-
-        if(!now) return;
-
-        if(now > entry) data.wins++;
-        else data.losses++;
-
-        localStorage.setItem(key, JSON.stringify(data));
-
-        document.getElementById("tradeCount").innerText =
-            data.wins + data.losses;
-
-    }, 60000);
-}
-
-/* =========================
    REGRESSION
 ========================= */
 function regression(history){
@@ -213,8 +214,10 @@ function regression(history){
     let n=history.length, sx=0,sy=0,sxy=0,sxx=0;
 
     for(let i=0;i<n;i++){
-        let x=i,y=history[i].price;
-        sx+=x; sy+=y; sxy+=x*y; sxx+=x*x;
+        sx+=i;
+        sy+=history[i].price;
+        sxy+=i*history[i].price;
+        sxx+=i*i;
     }
 
     let slope=(n*sxy-sx*sy)/(n*sxx-sx*sx);
@@ -224,43 +227,35 @@ function regression(history){
 }
 
 /* =========================
-   TREND (SHORT vs LONG)
+   TREND
 ========================= */
-function trend(history){
-    const short = regression(history.slice(-10));
-    const long = regression(history.slice(-50));
+function trend(h){
+    const s = regression(h.slice(-10));
+    const l = regression(h.slice(-50));
 
-    if(short > long*1.01) return "UP";
-    if(short < long*0.99) return "DOWN";
+    if(s > l*1.01) return "UP";
+    if(s < l*0.99) return "DOWN";
     return "STABLE";
 }
 
 /* =========================
-   MARKET CRASH
+   PUMP
 ========================= */
-function crash(items){
-    let avg = items.reduce((a,i)=>a+i.roi,0)/items.length;
-    return avg < -2;
-}
-
-/* =========================
-   PUMP DETECTION
-========================= */
-function pump(history){
-    let avg = history.reduce((a,b)=>a+b.price,0)/history.length;
-    return history[history.length-1].price > avg*1.25;
+function pump(h){
+    let avg = h.reduce((a,b)=>a+b.price,0)/h.length;
+    return h[h.length-1].price > avg*1.25;
 }
 
 /* =========================
    SCORE
 ========================= */
-function score(item, history){
-    let t = trend(history);
-    let s = item.roi * 0.5;
+function score(item,h){
+    let t = trend(h);
+    let s = item.roi*0.5;
 
     if(t==="UP") s+=20;
     if(t==="DOWN") s-=30;
-    if(pump(history)) s-=50;
+    if(pump(h)) s-=50;
 
     return s;
 }
@@ -268,17 +263,13 @@ function score(item, history){
 /* =========================
    SIGNAL
 ========================= */
-function signal(item, history){
-    let pred = regression(history);
-    let current = history[history.length-1].price;
+function signal(item,h){
+    let p = regression(h);
+    let c = h[h.length-1].price;
 
-    if(pump(history)) return "❌ MANIPULATION";
+    if(pump(h)) return "❌ MANIPULATION";
 
-    if(pred && pred > current*1.02){
-        trackTrade(item.name,current);
-        return "🟢 BUY EARLY";
-    }
-
+    if(p && p > c*1.02) return "🟢 BUY EARLY";
     if(item.roi > 5) return "🟡 WAIT";
 
     return "❌ AVOID";
@@ -287,14 +278,18 @@ function signal(item, history){
 /* =========================
    CHARTS
 ========================= */
-function draw(id, h){
+function draw(id,h){
     if(!h.length) return;
 
     return new Chart(document.getElementById(id),{
         type:"line",
         data:{
             labels:h.map(x=>new Date(x.time).toLocaleTimeString()),
-            datasets:[{data:h.map(x=>x.price),borderColor:"#00ff99"}]
+            datasets:[{
+                data:h.map(x=>x.price),
+                borderColor:"#00ff99",
+                fill:false
+            }]
         }
     });
 }
@@ -311,7 +306,32 @@ function updateCharts(){
 }
 
 /* =========================
-   MAIN LOOP
+   ALL ITEMS UI
+========================= */
+function renderAll(items){
+    const box=document.getElementById("allItems");
+    box.innerHTML="";
+
+    items.forEach(i=>{
+        let div=document.createElement("div");
+        div.className="itemRow";
+
+        div.innerHTML=`
+            <b>${i.name}</b><br>
+            <small>${i.price.toFixed(1)} | ${i.roi.toFixed(2)}%</small>
+        `;
+
+        div.onclick=()=>{
+            document.getElementById("itemSelect").value=i.name;
+            updateCharts();
+        };
+
+        box.appendChild(div);
+    });
+}
+
+/* =========================
+   LOAD
 ========================= */
 async function load(){
     const res=await fetch("https://api.hypixel.net/skyblock/bazaar");
@@ -343,30 +363,34 @@ async function load(){
             price:buy,
             roi,
             score:score({roi},h),
-            signal:signal({name,roi},h)
+            signal:signal({roi},h)
         });
     }
 
-    let marketCrash=crash(items);
+    allMarketItems = items.slice();
+
+    renderAll(allMarketItems);
+
+    let crash = items.reduce((a,i)=>a+i.roi,0)/items.length < -2;
 
     items.sort((a,b)=>b.score-a.score);
     items=items.slice(0,15);
 
-    render(items,marketCrash);
+    render(items,crash);
 }
 
 /* =========================
-   RENDER UI
+   RENDER TOP
 ========================= */
 function render(items,crash){
 
-    document.getElementById("status").innerText=
-        crash?"🚨 MARKET CRASH":"🟢 LIVE";
+    document.getElementById("status").innerText =
+        crash ? "🚨 MARKET CRASH" : "🟢 LIVE";
 
-    document.getElementById("bestROI").innerText=
+    document.getElementById("bestROI").innerText =
         items[0]?.roi.toFixed(2)+"%"||"-";
 
-    document.getElementById("bestTrade").innerHTML=
+    document.getElementById("bestTrade").innerHTML =
         "🔥 BEST: <b>"+items[0]?.name+"</b>";
 
     let table=document.getElementById("table");
@@ -383,9 +407,7 @@ function render(items,crash){
             <td>${i.price.toFixed(1)}</td>
             <td>${i.roi.toFixed(2)}</td>
             <td>${i.score.toFixed(1)}</td>
-            <td class="${i.signal.includes('BUY')?'buy':i.signal.includes('WAIT')?'wait':'avoid'}">
-                ${i.signal}
-            </td>
+            <td>${i.signal}</td>
         </tr>`;
 
         let opt=document.createElement("option");
@@ -396,9 +418,20 @@ function render(items,crash){
         if(idx===0) updateCharts();
     });
 
-    document.getElementById("marketStatus").innerText=
-        crash?"CRASH":"STABLE";
+    document.getElementById("marketStatus").innerText =
+        crash ? "CRASH" : "STABLE";
 }
+
+/* =========================
+   SEARCH
+========================= */
+document.getElementById("search").addEventListener("input",e=>{
+    let v=e.target.value.toLowerCase();
+
+    renderAll(
+        allMarketItems.filter(i=>i.name.toLowerCase().includes(v))
+    );
+});
 
 /* =========================
    LOOP
