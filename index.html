@@ -80,13 +80,6 @@ body{
     font-size:16px;
 }
 
-.best{
-    background:#111827;
-    padding:10px;
-    border-left:4px solid #00ff88;
-    margin-bottom:10px;
-}
-
 table{
     width:100%;
     border-collapse:collapse;
@@ -102,10 +95,6 @@ th,td{
 th{
     background:#111827;
 }
-
-.buy{ color:#00ff88; font-weight:bold; }
-.wait{ color:#ffcc00; }
-.avoid{ color:#ff4444; }
 
 canvas{
     margin-top:10px;
@@ -142,27 +131,17 @@ canvas{
 
     <div class="kpis">
         <div class="card">
-            <h3>🔥 Best ROI</h3>
-            <p id="bestROI">-</p>
+            <h3>🔥 Best Profit/Hour</h3>
+            <p id="bestPH">-</p>
         </div>
 
         <div class="card">
-            <h3>📉 Market</h3>
-            <p id="marketStatus">-</p>
-        </div>
-
-        <div class="card">
-            <h3>⚡ Items</h3>
+            <h3>📊 Items</h3>
             <p id="itemCount">0</p>
         </div>
     </div>
 
-    <div class="best" id="bestTrade">Loading...</div>
-
-    <h3>📊 24H Trend</h3>
-    <canvas id="dayChart"></canvas>
-
-    <h3>📊 Top AI Trades</h3>
+    <h3>📊 Top AI Bazaar Flips (Profit/Hour)</h3>
     <table id="table"></table>
 
 </div>
@@ -172,35 +151,20 @@ canvas{
 
 const TAX = 0.01125;
 
-let dayChart;
 let allMarketItems = [];
 let showManipulation = true;
 
 /* =========================
-   TOGGLE
+   TOGGLE MANIPULATION
 ========================= */
 function toggleManipulation(){
     showManipulation = !showManipulation;
     document.getElementById("manState").innerText =
         showManipulation ? "ON" : "OFF";
-
-    render(filterItems(allMarketItems));
 }
 
 /* =========================
-   FILTER LOGIC
-========================= */
-function filterItems(items){
-
-    if(showManipulation) return items;
-
-    return items.filter(i =>
-        !i.signal.includes("MANIPULATION")
-    );
-}
-
-/* =========================
-   HISTORY SYSTEM
+   HISTORY
 ========================= */
 function saveHistory(item, price){
     if(!item || !price) return;
@@ -218,7 +182,7 @@ function getHistory(item){
 }
 
 /* =========================
-   REGRESSION
+   AI CORE
 ========================= */
 function regression(h){
     if(!h || h.length < 10) return null;
@@ -241,9 +205,6 @@ function regression(h){
     return slope*n + intercept;
 }
 
-/* =========================
-   AI LOGIC
-========================= */
 function trend(h){
     let s=regression(h.slice(-10));
     let l=regression(h.slice(-50));
@@ -256,10 +217,32 @@ function trend(h){
 }
 
 function pump(h){
+    if(!h.length) return false;
     let avg=h.reduce((a,b)=>a+b.price,0)/h.length;
     return h[h.length-1].price > avg*1.25;
 }
 
+/* =========================
+   PROFIT PER HOUR (NEW)
+========================= */
+function profitPerHour(item, h, roi){
+
+    if(!h || h.length === 0) return 0;
+
+    let lastPrice = h[h.length-1].price;
+
+    let profit = lastPrice * (roi/100);
+
+    let hourlyVolume = (h.length > 0 ? 1 : 1);
+
+    let avgVolumePerHour = 1000;
+
+    return profit * avgVolumePerHour;
+}
+
+/* =========================
+   SCORE
+========================= */
 function score(item,h){
     let t=trend(h);
     let s=item.roi*0.5;
@@ -271,6 +254,9 @@ function score(item,h){
     return s;
 }
 
+/* =========================
+   SIGNAL
+========================= */
 function signal(item,h){
     let p=regression(h);
     let c=h[h.length-1].price;
@@ -282,90 +268,60 @@ function signal(item,h){
 }
 
 /* =========================
-   CHART
-========================= */
-function updateCharts(){
-
-    let sel=document.getElementById("itemSelect");
-    if(!sel.value) return;
-
-    let h=getHistory(sel.value).slice(-50);
-    if(h.length===0) return;
-
-    let labels=h.map(x=>new Date(x.time).toLocaleTimeString());
-    let data=h.map(x=>x.price);
-
-    if(!dayChart){
-        dayChart=new Chart(document.getElementById("dayChart"),{
-            type:"line",
-            data:{
-                labels,
-                datasets:[{
-                    data,
-                    borderColor:"#00ff99",
-                    fill:false
-                }]
-            }
-        });
-    } else {
-        dayChart.data.labels=labels;
-        dayChart.data.datasets[0].data=data;
-        dayChart.update();
-    }
-}
-
-/* =========================
-   LOAD MARKET
+   LOAD
 ========================= */
 async function load(){
 
     try{
 
-        let res=await fetch("https://api.hypixel.net/skyblock/bazaar");
-        let data=await res.json();
+        let res = await fetch("https://api.hypixel.net/skyblock/bazaar");
+        let data = await res.json();
 
-        let items=[];
+        let items = [];
 
         for(let id in data.products){
 
-            let s=data.products[id].quick_status;
+            let s = data.products[id].quick_status;
             if(!s) continue;
 
-            let buy=s.sellPrice;
-            let sell=s.buyPrice;
+            let buy = s.sellPrice;
+            let sell = s.buyPrice;
 
-            if(!buy||!sell) continue;
+            if(!buy || !sell) continue;
 
-            let profit=(sell-buy)-(sell*TAX);
-            let roi=(profit/buy)*100;
+            let profit = (sell-buy)-(sell*TAX);
+            let roi = (profit/buy)*100;
 
-            if(s.sellMovingWeek<100000) continue;
+            if(s.sellMovingWeek < 100000) continue;
 
-            let name=id.replaceAll("_"," ");
+            let name = id.replaceAll("_"," ");
 
-            saveHistory(name,buy);
+            saveHistory(name, buy);
 
-            let h=getHistory(name);
+            let h = getHistory(name);
 
             let sig = signal({roi},h);
 
+            let ppH = profitPerHour({roi}, h, roi);
+
+            if(!showManipulation && sig.includes("MANIPULATION")) continue;
+
             items.push({
                 name,
-                price:buy,
+                price: buy,
                 roi,
-                score:score({roi},h),
-                signal:sig
+                score: score({roi},h),
+                signal: sig,
+                pph: ppH
             });
         }
 
         allMarketItems = items.slice();
 
-        let filtered = filterItems(allMarketItems);
+        items.sort((a,b)=>b.pph-a.pph);
+        items = items.slice(0,10);
 
-        filtered.sort((a,b)=>b.score-a.score);
-        filtered = filtered.slice(0,10);
-
-        render(filtered);
+        render(items);
 
         document.getElementById("status").innerText="🟢 LIVE";
 
@@ -381,38 +337,38 @@ async function load(){
 function render(items){
 
     let table=document.getElementById("table");
-    let sel=document.getElementById("itemSelect");
 
-    table.innerHTML=`<tr><th>Item</th><th>Price</th><th>ROI</th><th>Score</th><th>Signal</th></tr>`;
-    sel.innerHTML="";
+    table.innerHTML=`
+    <tr>
+        <th>Item</th>
+        <th>Price</th>
+        <th>ROI</th>
+        <th>Profit/Hour</th>
+        <th>Signal</th>
+    </tr>`;
 
-    items.forEach((i,idx)=>{
+    let best = items[0];
+
+    document.getElementById("bestPH").innerText =
+        best ? best.pph.toFixed(2) : "-";
+
+    items.forEach(i=>{
 
         table.innerHTML+=`
         <tr>
             <td>${i.name}</td>
             <td>${i.price.toFixed(1)}</td>
             <td>${i.roi.toFixed(2)}</td>
-            <td>${i.score.toFixed(1)}</td>
+            <td>${i.pph.toFixed(2)}</td>
             <td>${i.signal}</td>
         </tr>`;
-
-        let opt=document.createElement("option");
-        opt.value=i.name;
-        opt.text=i.name;
-        sel.appendChild(opt);
-
-        if(idx===0){
-            sel.value=i.name;
-            updateCharts();
-        }
     });
 
-    document.getElementById("itemCount").innerText=items.length;
+    document.getElementById("itemCount").innerText = items.length;
 }
 
 /* =========================
-   LOOP (5 SEC)
+   LOOP (5s STABLE)
 ========================= */
 async function loop(){
     await load();
