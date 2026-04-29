@@ -139,5 +139,16 @@ setInterval(getFlips, 5000);
 </script>
  <h2>🔥 Best Flip Right Now</h2>
 <div id="bestFlip" style="font-size: 20px; margin: 10px;"></div>
+    function detectCrash(items) {
+    const avgROI = items.reduce((a, b) => a + b.roi, 0) / items.length;
+
+    if (avgROI < 2) {
+        return "🚨 MARKET CRASH DETECTED";
+    }
+    if (avgROI < 5) {
+        return "⚠️ Weak Market";
+    }
+    return "🟢 Stable Market";
+}
 </body>
 </html>
