@@ -11,14 +11,14 @@
         th, td { padding:10px; border-bottom:1px solid #444; }
         th { background:#222; }
         canvas { max-width:900px; margin:20px auto; }
+        #status { color:#ffcc00; }
     </style>
 </head>
-
 <body>
 
 <h1>Hypixel AI Flip Tool</h1>
 
-<h2 id="status">Connecting...</h2>
+<h2 id="status">Connecting to server...</h2>
 <h2 id="best">Loading...</h2>
 
 <canvas id="chart"></canvas>
@@ -36,53 +36,70 @@
 </table>
 
 <script>
-const socket = io("http://localhost:3000");
 let chart;
+let socket;
 
-/* -------------------------------
-   REAL FLIP CALC (CLEAN VERSION)
---------------------------------*/
-function calculateFlip(stats) {
-    const buyPrice = stats.sellPrice;
-    const sellPrice = stats.buyPrice;
-
-    const buyVolume = stats.buyMovingWeek || 1;
-    const sellVolume = stats.sellMovingWeek || 1;
-
-    const spread = sellPrice - buyPrice;
-    const tax = sellPrice * 0.01125;
-
-    const netProfit = spread - tax;
-    const roi = (netProfit / buyPrice) * 100;
-
-    const demandBalance = buyVolume / (sellVolume + 1);
-    const liquidity = Math.log10(buyVolume + sellVolume);
-
-    const confidence =
-        (spread > 0 ? 30 : -30) +
-        (demandBalance > 1 ? 20 : -10) +
-        (liquidity * 5) +
-        (roi > 10 ? 20 : -10);
-
-    return { buyPrice, sellPrice, netProfit, roi, confidence };
+function setStatus(msg, color="#ffcc00"){
+    const el = document.getElementById("status");
+    el.innerText = msg;
+    el.style.color = color;
 }
 
-/* -------------------------------
-   SOCKET LIVE MARKET FEED
---------------------------------*/
-socket.on("marketUpdate", (data) => {
+function connectSocket(){
+    setStatus("Connecting WebSocket...");
 
-    document.getElementById("status").innerText = data.marketStatus;
+    socket = io("http://localhost:3000", {
+        reconnection: true,
+        timeout: 5000
+    });
+
+    socket.on("connect", () => {
+        setStatus("LIVE WebSocket Connected", "#00ff99");
+    });
+
+    socket.on("disconnect", () => {
+        setStatus("Disconnected - retrying...");
+    });
+
+    socket.on("marketUpdate", (data) => {
+        render(data);
+    });
+
+    /* fallback if server never responds */
+    setTimeout(() => {
+        if (!socket.connected) {
+            setStatus("WebSocket failed - fallback mode", "#ff4444");
+            startFallback();
+        }
+    }, 6000);
+}
+
+function startFallback(){
+    setInterval(async () => {
+        try {
+            const res = await fetch("https://api.hypixel.net/skyblock/bazaar");
+            const data = await res.json();
+
+            render({
+                marketStatus: "FALLBACK",
+                best: { name: "API Mode" },
+                items: [],
+                history: []
+            });
+        } catch (e) {
+            setStatus("API failed", "#ff4444");
+        }
+    }, 5000);
+}
+
+function render(data){
     document.getElementById("best").innerText = "🔥 " + data.best.name;
 
     const table = document.getElementById("table");
     table.innerHTML = "";
 
     data.items.forEach(i => {
-
-        const signal =
-            i.roi > 20 ? "BUY" :
-            i.roi > 5 ? "WAIT" : "AVOID";
+        const signal = i.roi > 20 ? "BUY" : i.roi > 5 ? "WAIT" : "AVOID";
 
         table.innerHTML += `
             <tr>
@@ -90,30 +107,4 @@ socket.on("marketUpdate", (data) => {
                 <td>${i.price.toFixed(1)}</td>
                 <td>${i.roi.toFixed(2)}</td>
                 <td>${signal}</td>
-            </tr>
-        `;
-    });
-
-    /* ---------------- chart ---------------- */
-    if (chart) chart.destroy();
-
-    chart = new Chart(document.getElementById("chart"), {
-        type: "line",
-        data: {
-            labels: data.history.map(x =>
-                new Date(x.time).toLocaleTimeString()
-            ),
-            datasets: [{
-                label: "Market Price",
-                data: data.history.map(x => x.price),
-                borderColor: "#00ff99",
-                fill: false
-            }]
-        }
-    });
-});
-
-</script>
-
-</body>
 </html>
