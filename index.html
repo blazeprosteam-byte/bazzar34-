@@ -149,6 +149,16 @@ setInterval(getFlips, 5000);
         return "⚠️ Weak Market";
     }
     return "🟢 Stable Market";
+} 
+document.getElementById("bestFlip").innerHTML += `
+<br><br><b>${detectCrash(results)}</b>
+`;
+   if (
+    stats.sellMovingWeek < 50000 ||  // low liquidity = manipulation risk
+    roi > 500                       // extreme spikes = likely fake
+) {
+    return;
 }
+        
 </body>
 </html>
