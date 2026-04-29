@@ -207,6 +207,79 @@ function updateMainChart(){
 
 getFlips();
 setInterval(getFlips, 5000);
+    }
+
+    <!DOCTYPE html>
+<html>
+<head>
+    <title>Hypixel Bazaar AI Flip Tool</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        body { font-family: Arial; background:#111; color:#eee; text-align:center; }
+        table { margin:auto; width:85%; border-collapse:collapse; }
+        th, td { padding:10px; border-bottom:1px solid #444; }
+        th { background:#222; }
+        canvas { max-width:900px; margin:20px auto; }
+    </style>
+</head>
+<body>
+
+<h1>Hypixel AI Flip Tool</h1>
+
+<h2 id="status">Connecting WebSocket...</h2>
+<h2 id="best">Loading...</h2>
+
+<canvas id="chart"></canvas>
+
+<table>
+<thead>
+<tr><th>Item</th><th>Price</th><th>ROI</th><th>Signal</th></tr>
+</thead>
+<tbody id="table"></tbody>
+</table>
+
+<script>
+const socket = io("http://localhost:3000");
+let chart;
+
+socket.on("marketUpdate", (data) => {
+    document.getElementById("status").innerText = data.marketStatus;
+    document.getElementById("best").innerText = "🔥 " + data.best.name;
+
+    const table = document.getElementById("table");
+    table.innerHTML = "";
+
+    data.items.forEach(i => {
+        const signal = i.roi > 20 ? "BUY" : i.roi > 5 ? "WAIT" : "AVOID";
+
+        table.innerHTML += `<tr>
+            <td>${i.name}</td>
+            <td>${i.price.toFixed(1)}</td>
+            <td>${i.roi.toFixed(2)}</td>
+            <td>${signal}</td>
+        </tr>`;
+    });
+
+    if(chart) chart.destroy();
+
+    chart = new Chart(document.getElementById("chart"), {
+        type:"line",
+        data:{
+            labels:data.history.map(x=>new Date(x.time).toLocaleTimeString()),
+            datasets:[{
+                label:"Market Price",
+                data:data.history.map(x=>x.price),
+                borderColor:"#00ff99"
+            }]
+        }
+    });
+});
+</script>
+
+</body>
+</html>
+
 </script>
 </body>
 </html>
