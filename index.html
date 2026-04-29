@@ -1,110 +1,230 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Hypixel Bazaar AI Flip Tool</title>
+    <title>AI Bazaar Trader</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 
     <style>
         body { font-family: Arial; background:#111; color:#eee; text-align:center; }
-        table { margin:auto; width:85%; border-collapse:collapse; }
+        table { margin:auto; width:90%; border-collapse:collapse; }
         th, td { padding:10px; border-bottom:1px solid #444; }
         th { background:#222; }
         canvas { max-width:900px; margin:20px auto; }
-        #status { color:#ffcc00; }
+
+        .buy { color:#00ff88; }
+        .wait { color:#ffcc00; }
+        .avoid { color:#ff4444; }
     </style>
 </head>
 <body>
 
-<h1>Hypixel AI Flip Tool</h1>
+<h1>🤖 AI Bazaar Trader</h1>
+<h3 id="status">Loading...</h3>
 
-<h2 id="status">Connecting to server...</h2>
-<h2 id="best">Loading...</h2>
+<select id="itemSelect" onchange="updateCharts()"></select>
 
-<canvas id="chart"></canvas>
+<h2>📊 Daily Trend</h2>
+<canvas id="dayChart"></canvas>
 
-<table>
-<thead>
+<h2>📈 7 Day Trend</h2>
+<canvas id="weekChart"></canvas>
+
+<table id="table">
 <tr>
-    <th>Item</th>
-    <th>Price</th>
-    <th>ROI</th>
-    <th>Signal</th>
+    <th>Item</th><th>Buy</th><th>Profit</th>
+    <th>ROI</th><th>Prediction</th><th>Signal</th>
 </tr>
-</thead>
-<tbody id="table"></tbody>
 </table>
 
 <script>
-let chart;
-let socket;
+const TAX = 0.01125;
+const MIN_VOLUME = 100000;
 
-function setStatus(msg, color="#ffcc00"){
-    const el = document.getElementById("status");
-    el.innerText = msg;
-    el.style.color = color;
+let dayChart, weekChart;
+
+/* ---------------- HISTORY STORAGE ---------------- */
+function saveHistory(item, price){
+    let data = JSON.parse(localStorage.getItem(item) || "[]");
+
+    data.push({ time: Date.now(), price });
+
+    if (data.length > 500) data.shift(); // ~7 days simulated
+
+    localStorage.setItem(item, JSON.stringify(data));
 }
 
-function connectSocket(){
-    setStatus("Connecting WebSocket...");
+function getHistory(item){
+    return JSON.parse(localStorage.getItem(item) || "[]");
+}
 
-    socket = io("http://localhost:3000", {
-        reconnection: true,
-        timeout: 5000
-    });
+/* ---------------- PREDICTION ENGINE ---------------- */
+function predictTrend(history){
+    if (history.length < 10) return 0;
 
-    socket.on("connect", () => {
-        setStatus("LIVE WebSocket Connected", "#00ff99");
-    });
+    let momentum = 0;
 
-    socket.on("disconnect", () => {
-        setStatus("Disconnected - retrying...");
-    });
+    for (let i = 1; i < history.length; i++){
+        momentum += history[i].price - history[i-1].price;
+    }
 
-    socket.on("marketUpdate", (data) => {
-        render(data);
-    });
+    return momentum / history.length;
+}
 
-    /* fallback if server never responds */
-    setTimeout(() => {
-        if (!socket.connected) {
-            setStatus("WebSocket failed - fallback mode", "#ff4444");
-            startFallback();
+function predictSignal(item, history){
+    const trend = predictTrend(history);
+
+    if (trend > 0.5 && item.roi > 5) return "📈 RISING";
+    if (trend > 1.5) return "⚡ SPIKE SOON";
+    if (trend < -0.5) return "📉 FALLING";
+
+    return "➡️ STABLE";
+}
+
+function aiSignal(item, prediction){
+    if (prediction.includes("SPIKE")) return "🟢 BUY EARLY";
+    if (prediction.includes("RISING") && item.roi > 10) return "🟢 BUY";
+    if (item.roi > 5) return "🟡 WAIT";
+    return "❌ AVOID";
+}
+
+/* ---------------- FLIP CALC ---------------- */
+function calc(stats){
+    const buy = stats.sellPrice;
+    const sell = stats.buyPrice;
+
+    if (buy <= 0 || sell <= 0) return null;
+
+    const profit = (sell - buy) - (sell * TAX);
+    if (profit <= 0) return null;
+
+    const roi = (profit / buy) * 100;
+
+    return { buy, profit, roi };
+}
+
+/* ---------------- CHARTS ---------------- */
+function drawChart(canvasId, history, label){
+    if (!history.length) return;
+
+    const labels = history.map(x => new Date(x.time).toLocaleTimeString());
+    const data = history.map(x => x.price);
+
+    return new Chart(document.getElementById(canvasId), {
+        type: "line",
+        data: {
+            labels,
+            datasets: [{
+                label,
+                data,
+                borderColor: "#00ff99",
+                fill: false
+            }]
         }
-    }, 6000);
+    });
 }
 
-function startFallback(){
-    setInterval(async () => {
-        try {
-            const res = await fetch("https://api.hypixel.net/skyblock/bazaar");
-            const data = await res.json();
+function updateCharts(){
+    const item = document.getElementById("itemSelect").value;
+    const history = getHistory(item);
 
-            render({
-                marketStatus: "FALLBACK",
-                best: { name: "API Mode" },
-                items: [],
-                history: []
-            });
-        } catch (e) {
-            setStatus("API failed", "#ff4444");
-        }
-    }, 5000);
+    const day = history.slice(-50);   // ~daily
+    const week = history;            // full stored
+
+    if(dayChart) dayChart.destroy();
+    if(weekChart) weekChart.destroy();
+
+    dayChart = drawChart("dayChart", day, "24h");
+    weekChart = drawChart("weekChart", week, "7 days");
 }
 
-function render(data){
-    document.getElementById("best").innerText = "🔥 " + data.best.name;
+/* ---------------- MAIN LOAD ---------------- */
+async function load(){
+    document.getElementById("status").innerText = "Fetching Bazaar...";
 
+    const res = await fetch("https://api.hypixel.net/skyblock/bazaar");
+    const data = await res.json();
+
+    let results = [];
+
+    for (const id in data.products){
+        const stats = data.products[id].quick_status;
+
+        if (stats.sellMovingWeek < MIN_VOLUME) continue;
+
+        const flip = calc(stats);
+        if (!flip) continue;
+
+        const name = id.replaceAll("_"," ");
+
+        saveHistory(name, flip.buy);
+
+        const history = getHistory(name);
+        const prediction = predictSignal(flip, history);
+        const signal = aiSignal(flip, prediction);
+
+        results.push({
+            name,
+            ...flip,
+            prediction,
+            signal
+        });
+    }
+
+    results.sort((a,b)=>b.roi-a.roi);
+    results = results.slice(0, 15);
+
+    render(results);
+}
+
+/* ---------------- RENDER ---------------- */
+function render(items){
     const table = document.getElementById("table");
-    table.innerHTML = "";
+    const select = document.getElementById("itemSelect");
 
-    data.items.forEach(i => {
-        const signal = i.roi > 20 ? "BUY" : i.roi > 5 ? "WAIT" : "AVOID";
+    table.innerHTML = `
+        <tr>
+            <th>Item</th><th>Buy</th><th>Profit</th>
+            <th>ROI</th><th>Prediction</th><th>Signal</th>
+        </tr>
+    `;
 
-        table.innerHTML += `
-            <tr>
-                <td>${i.name}</td>
-                <td>${i.price.toFixed(1)}</td>
-                <td>${i.roi.toFixed(2)}</td>
-                <td>${signal}</td>
+    select.innerHTML = "";
+
+    items.forEach((item, i)=>{
+        const row = document.createElement("tr");
+
+        row.innerHTML = `
+            <td>${item.name}</td>
+            <td>${item.buy.toFixed(1)}</td>
+            <td>${item.profit.toFixed(1)}</td>
+            <td>${item.roi.toFixed(2)}</td>
+            <td>${item.prediction}</td>
+            <td class="${item.signal.includes('BUY')?'buy':item.signal.includes('WAIT')?'wait':'avoid'}">
+                ${item.signal}
+            </td>
+        `;
+
+        table.appendChild(row);
+
+        const opt = document.createElement("option");
+        opt.value = item.name;
+        opt.text = item.name;
+        select.appendChild(opt);
+
+        if(i === 0){
+            updateCharts();
+        }
+    });
+
+    document.getElementById("status").innerText =
+        "Updated: " + new Date().toLocaleTimeString();
+}
+
+/* ---------------- LOOP ---------------- */
+load();
+setInterval(load, 10000);
+
+</script>
+
+</body>
 </html>
