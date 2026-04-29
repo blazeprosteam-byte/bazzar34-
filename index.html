@@ -3,218 +3,8 @@
 <head>
     <title>Hypixel Bazaar AI Flip Tool</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { font-family: Arial; background: #111; color: #eee; text-align: center; }
-        table { margin: auto; border-collapse: collapse; width: 85%; }
-        th, td { padding: 10px; border-bottom: 1px solid #444; }
-        th { background: #222; }
-        tr:hover { background: #333; }
-        canvas { max-width: 900px; margin: 20px auto; }
-        select { padding: 8px; margin: 10px; }
-        .panel { margin: 20px; }
-    </style>
-</head>
-
-<body>
-    <h1>Hypixel Bazaar AI Flip Tool</h1>
-
-    <h2>🔥 Best Flip Right Now</h2>
-    <div id="bestFlip" style="font-size:18px;"></div>
-
-    <div class="panel">
-        <label>📊 Select Item for 7-Day Chart:</label>
-        <select id="itemSelect" onchange="updateMainChart()"></select>
-    </div>
-
-    <canvas id="mainChart"></canvas>
-
-    <h2>📈 Top 3 Item Comparison (7-Day Trend)</h2>
-    <canvas id="compareChart"></canvas>
-
-    <table id="flipTable">
-        <tr>
-            <th>Item</th>
-            <th>Buy Price</th>
-            <th>Profit</th>
-            <th>ROI (%)</th>
-            <th>AI Signal</th>
-            <th>Spike</th>
-        </tr>
-    </table>
-
-<script>
-let mainChart;
-let compareChart;
-
-function saveHistory(item, price) {
-    let history = JSON.parse(localStorage.getItem(item) || "[]");
-
-    history.push({ time: Date.now(), price });
-
-    if (history.length > 200) history.shift();
-
-    localStorage.setItem(item, JSON.stringify(history));
-}
-
-function getHistory(item) {
-    return JSON.parse(localStorage.getItem(item) || "[]");
-}
-
-function renderMainChart(item) {
-    let history = getHistory(item);
-
-    const labels = history.map(p => new Date(p.time).toLocaleString());
-    const data = history.map(p => p.price);
-
-    if (mainChart) mainChart.destroy();
-
-    mainChart = new Chart(document.getElementById("mainChart"), {
-        type: 'line',
-        data: {
-            labels,
-            datasets: [{
-                label: item,
-                data,
-                borderColor: '#00ff99',
-                fill: false
-            }]
-        }
-    });
-}
-
-function renderCompareChart(items) {
-    const labels = getHistory(items[0].name).map(p => new Date(p.time).toLocaleDateString());
-
-    const datasets = items.slice(0,3).map(item => {
-        const history = getHistory(item.name);
-        return {
-            label: item.name,
-            data: history.map(p => p.price),
-            fill: false
-        };
-    });
-
-    if (compareChart) compareChart.destroy();
-
-    compareChart = new Chart(document.getElementById("compareChart"), {
-        type: 'line',
-        data: { labels, datasets }
-    });
-}
-
-function aiDecision(item) {
-    const roi = item.roi;
-    const volatilityPenalty = Math.random() * 10;
-    const manipulationRisk = roi > 200 ? 30 : 0;
-
-    const score = roi - volatilityPenalty - manipulationRisk;
-
-    if (roi < 5) return "❌ AVOID";
-    if (score > 40) return "🟢 BUY NOW";
-    if (score > 20) return "🟡 WAIT";
-    return "❌ AVOID";
-}
-
-function spikeAlert(item, history) {
-    if (history.length < 5) return "";
-
-    const last = history[history.length - 1].price;
-    const prev = history[history.length - 2].price;
-
-    const change = ((last - prev) / prev) * 100;
-
-    if (change > 3) return "⚡ SPIKE";
-    if (change < -3) return "📉 DROP";
-    return "";
-}
-
-async function getFlips() {
-    const res = await fetch("https://api.hypixel.net/skyblock/bazaar");
-    const data = await res.json();
-
-    if (!data.success) return;
-
-    const products = data.products;
-    let results = [];
-
-    for (const id in products) {
-        const stats = products[id].quick_status;
-
-        const buy = stats.sellPrice;
-        const sell = stats.buyPrice;
-
-        const tax = sell * 0.01125;
-        const profit = sell - buy - tax;
-
-        if (buy <= 0 || profit <= 0) continue;
-
-        const roi = (profit / buy) * 100;
-
-        if (stats.sellMovingWeek < 50000 || roi > 500) continue;
-
-        const name = id.replaceAll("_"," ");
-
-        results.push({ name, buy_at: buy, profit, roi });
-    }
-
-    results.sort((a,b)=>b.roi-a.roi);
-    results = results.slice(0,10);
-
-    document.getElementById("bestFlip").innerHTML = `
-        🟢 <b>${results[0].name}</b><br>
-        Profit: ${results[0].profit.toFixed(1)} | ROI: ${results[0].roi.toFixed(2)}%
-    `;
-
-    const table = document.getElementById("flipTable");
-    table.innerHTML = `
-        <tr>
-            <th>Item</th><th>Buy</th><th>Profit</th><th>ROI</th><th>AI</th><th>Spike</th>
-        </tr>
-    `;
-
-    const select = document.getElementById("itemSelect");
-    select.innerHTML = "";
-
-    results.forEach((item,i)=>{
-        const history = getHistory(item.name);
-        saveHistory(item.name, item.buy_at);
-
-        const row = table.insertRow();
-        row.innerHTML = `
-            <td>${item.name}</td>
-            <td>${item.buy_at.toFixed(1)}</td>
-            <td>${item.profit.toFixed(1)}</td>
-            <td>${item.roi.toFixed(2)}</td>
-            <td>${aiDecision(item)}</td>
-            <td>${spikeAlert(item, history)}</td>
-        `;
-
-        const opt = document.createElement("option");
-        opt.value = item.name;
-        opt.text = item.name;
-        select.appendChild(opt);
-
-        if(i===0) renderMainChart(item.name);
-    });
-
-    renderCompareChart(results);
-}
-
-function updateMainChart(){
-    const item = document.getElementById("itemSelect").value;
-    renderMainChart(item);
-}
-
-getFlips();
-setInterval(getFlips, 5000);
-    }
-
-    <!DOCTYPE html>
-<html>
-<head>
-    <title>Hypixel Bazaar AI Flip Tool</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
     <style>
         body { font-family: Arial; background:#111; color:#eee; text-align:center; }
         table { margin:auto; width:85%; border-collapse:collapse; }
@@ -223,18 +13,24 @@ setInterval(getFlips, 5000);
         canvas { max-width:900px; margin:20px auto; }
     </style>
 </head>
+
 <body>
 
 <h1>Hypixel AI Flip Tool</h1>
 
-<h2 id="status">Connecting WebSocket...</h2>
+<h2 id="status">Connecting...</h2>
 <h2 id="best">Loading...</h2>
 
 <canvas id="chart"></canvas>
 
 <table>
 <thead>
-<tr><th>Item</th><th>Price</th><th>ROI</th><th>Signal</th></tr>
+<tr>
+    <th>Item</th>
+    <th>Price</th>
+    <th>ROI</th>
+    <th>Signal</th>
+</tr>
 </thead>
 <tbody id="table"></tbody>
 </table>
@@ -243,7 +39,39 @@ setInterval(getFlips, 5000);
 const socket = io("http://localhost:3000");
 let chart;
 
+/* -------------------------------
+   REAL FLIP CALC (CLEAN VERSION)
+--------------------------------*/
+function calculateFlip(stats) {
+    const buyPrice = stats.sellPrice;
+    const sellPrice = stats.buyPrice;
+
+    const buyVolume = stats.buyMovingWeek || 1;
+    const sellVolume = stats.sellMovingWeek || 1;
+
+    const spread = sellPrice - buyPrice;
+    const tax = sellPrice * 0.01125;
+
+    const netProfit = spread - tax;
+    const roi = (netProfit / buyPrice) * 100;
+
+    const demandBalance = buyVolume / (sellVolume + 1);
+    const liquidity = Math.log10(buyVolume + sellVolume);
+
+    const confidence =
+        (spread > 0 ? 30 : -30) +
+        (demandBalance > 1 ? 20 : -10) +
+        (liquidity * 5) +
+        (roi > 10 ? 20 : -10);
+
+    return { buyPrice, sellPrice, netProfit, roi, confidence };
+}
+
+/* -------------------------------
+   SOCKET LIVE MARKET FEED
+--------------------------------*/
 socket.on("marketUpdate", (data) => {
+
     document.getElementById("status").innerText = data.marketStatus;
     document.getElementById("best").innerText = "🔥 " + data.best.name;
 
@@ -251,32 +79,41 @@ socket.on("marketUpdate", (data) => {
     table.innerHTML = "";
 
     data.items.forEach(i => {
-        const signal = i.roi > 20 ? "BUY" : i.roi > 5 ? "WAIT" : "AVOID";
 
-        table.innerHTML += `<tr>
-            <td>${i.name}</td>
-            <td>${i.price.toFixed(1)}</td>
-            <td>${i.roi.toFixed(2)}</td>
-            <td>${signal}</td>
-        </tr>`;
+        const signal =
+            i.roi > 20 ? "BUY" :
+            i.roi > 5 ? "WAIT" : "AVOID";
+
+        table.innerHTML += `
+            <tr>
+                <td>${i.name}</td>
+                <td>${i.price.toFixed(1)}</td>
+                <td>${i.roi.toFixed(2)}</td>
+                <td>${signal}</td>
+            </tr>
+        `;
     });
 
-    if(chart) chart.destroy();
+    /* ---------------- chart ---------------- */
+    if (chart) chart.destroy();
 
     chart = new Chart(document.getElementById("chart"), {
-        type:"line",
-        data:{
-            labels:data.history.map(x=>new Date(x.time).toLocaleTimeString()),
-            datasets:[{
-                label:"Market Price",
-                data:data.history.map(x=>x.price),
-                borderColor:"#00ff99"
+        type: "line",
+        data: {
+            labels: data.history.map(x =>
+                new Date(x.time).toLocaleTimeString()
+            ),
+            datasets: [{
+                label: "Market Price",
+                data: data.history.map(x => x.price),
+                borderColor: "#00ff99",
+                fill: false
             }]
         }
     });
 });
 
-    
 </script>
+
 </body>
 </html>
