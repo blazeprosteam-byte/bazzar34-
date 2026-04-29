@@ -24,23 +24,33 @@ body{
     height:100vh;
 }
 
-/* SIDEBAR */
 .sidebar{
     background:#0f172a;
     padding:10px;
     border-right:1px solid #222;
 }
 
-.sidebar select{
+.sidebar select,
+.sidebar button{
     width:100%;
     padding:8px;
     background:#111827;
     color:white;
     border:none;
     margin-bottom:8px;
+    cursor:pointer;
 }
 
-/* MAIN */
+.toggle{
+    padding:8px;
+    background:#111827;
+    margin-bottom:10px;
+    border:1px solid #333;
+    cursor:pointer;
+    text-align:center;
+    border-radius:6px;
+}
+
 .main{
     padding:15px;
 }
@@ -119,7 +129,10 @@ canvas{
 <!-- SIDEBAR -->
 <div class="sidebar">
 
-    <h3>🎯 Select Item</h3>
+    <div class="toggle" onclick="toggleManipulation()">
+        🧠 Show Manipulation: <span id="manState">ON</span>
+    </div>
+
     <select id="itemSelect" onchange="updateCharts()"></select>
 
 </div>
@@ -161,6 +174,30 @@ const TAX = 0.01125;
 
 let dayChart;
 let allMarketItems = [];
+let showManipulation = true;
+
+/* =========================
+   TOGGLE
+========================= */
+function toggleManipulation(){
+    showManipulation = !showManipulation;
+    document.getElementById("manState").innerText =
+        showManipulation ? "ON" : "OFF";
+
+    render(filterItems(allMarketItems));
+}
+
+/* =========================
+   FILTER LOGIC
+========================= */
+function filterItems(items){
+
+    if(showManipulation) return items;
+
+    return items.filter(i =>
+        !i.signal.includes("MANIPULATION")
+    );
+}
 
 /* =========================
    HISTORY SYSTEM
@@ -205,7 +242,7 @@ function regression(h){
 }
 
 /* =========================
-   TREND + AI
+   AI LOGIC
 ========================= */
 function trend(h){
     let s=regression(h.slice(-10));
@@ -245,7 +282,7 @@ function signal(item,h){
 }
 
 /* =========================
-   CHARTS
+   CHART
 ========================= */
 function updateCharts(){
 
@@ -310,21 +347,25 @@ async function load(){
 
             let h=getHistory(name);
 
+            let sig = signal({roi},h);
+
             items.push({
                 name,
                 price:buy,
                 roi,
                 score:score({roi},h),
-                signal:signal({roi},h)
+                signal:sig
             });
         }
 
         allMarketItems = items.slice();
 
-        items.sort((a,b)=>b.score-a.score);
-        items = items.slice(0,15);
+        let filtered = filterItems(allMarketItems);
 
-        render(items);
+        filtered.sort((a,b)=>b.score-a.score);
+        filtered = filtered.slice(0,10);
+
+        render(filtered);
 
         document.getElementById("status").innerText="🟢 LIVE";
 
@@ -361,7 +402,7 @@ function render(items){
         opt.text=i.name;
         sel.appendChild(opt);
 
-        if(idx===0) {
+        if(idx===0){
             sel.value=i.name;
             updateCharts();
         }
@@ -371,7 +412,7 @@ function render(items){
 }
 
 /* =========================
-   LOOP (5 SEC STABLE)
+   LOOP (5 SEC)
 ========================= */
 async function loop(){
     await load();
