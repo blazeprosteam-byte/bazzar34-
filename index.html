@@ -1,4 +1,4 @@
-<!DOCTYPE html><!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 <head>
     <title>Pro Bazaar Trading Terminal</title>
@@ -61,10 +61,6 @@ th{
     background:#111827;
 }
 
-.buy{ color:#00ff88; font-weight:bold; }
-.wait{ color:#ffcc00; }
-.avoid{ color:#ff4444; }
-
 canvas{
     margin-top:10px;
     background:#0f172a;
@@ -72,17 +68,12 @@ canvas{
     padding:10px;
 }
 
+/* FEATURED ITEMS */
 .featured{
     padding:10px;
-    margin-bottom:10px;
+    margin-top:10px;
     background:#111827;
     border-left:4px solid #00ff88;
-}
-
-.featured h3{
-    margin:0;
-    font-size:14px;
-    color:#9ca3af;
 }
 
 .featured-item{
@@ -91,6 +82,11 @@ canvas{
     background:#0f172a;
     border-radius:6px;
 }
+
+.buy{ color:#00ff88; font-weight:bold; }
+.wait{ color:#ffcc00; }
+.avoid{ color:#ff4444; }
+
 </style>
 
 </head>
@@ -110,13 +106,10 @@ canvas{
     <h3>🎯 Select Item</h3>
     <select id="itemSelect" onchange="updateCharts()"></select>
 
-    <!-- FIXED FEATURED ITEMS -->
     <div class="featured">
-        <h3>🔥 Featured Stable Items</h3>
-
+        <h3>🔥 Stable Items</h3>
         <div class="featured-item">🟣 Recombobulator 3000</div>
         <div class="featured-item">🍪 Booster Cookie</div>
-
     </div>
 
 </div>
@@ -127,7 +120,7 @@ canvas{
     <h3>📊 24H Trend</h3>
     <canvas id="dayChart"></canvas>
 
-    <h3>📊 Top AI Bazaar Flips</h3>
+    <h3>📊 Top Bazaar Flips</h3>
     <table id="table"></table>
 
 </div>
@@ -141,10 +134,10 @@ let dayChart;
 let allMarketItems = [];
 
 /* =========================
-   HISTORY SYSTEM
+   SAFE HISTORY
 ========================= */
 function saveHistory(item, price){
-    if(!item) return;
+    if(!item || !price) return;
 
     let data = JSON.parse(localStorage.getItem(item) || "[]");
     data.push({ time: Date.now(), price });
@@ -159,7 +152,7 @@ function getHistory(item){
 }
 
 /* =========================
-   REGRESSION
+   SAFE REGRESSION
 ========================= */
 function regression(h){
     if(!h || h.length < 10) return null;
@@ -220,7 +213,7 @@ function signal(item,h){
     if(!h || h.length < 10) return "WAIT DATA";
 
     let p = regression(h);
-    let c = h[h.length-1].price;
+    let c = h[h.length-1]?.price || 0;
 
     if(pump(h)) return "❌ MANIPULATION";
     if(p && p > c*1.02) return "🟢 BUY EARLY";
@@ -230,7 +223,7 @@ function signal(item,h){
 }
 
 /* =========================
-   CHART
+   CHART SAFE INIT
 ========================= */
 function updateCharts(){
 
@@ -247,7 +240,14 @@ function updateCharts(){
     if(!dayChart){
         dayChart=new Chart(document.getElementById("dayChart"),{
             type:"line",
-            data:{labels,datasets:[{data,borderColor:"#00ff99"}]}
+            data:{
+                labels,
+                datasets:[{
+                    data,
+                    borderColor:"#00ff99",
+                    fill:false
+                }]
+            }
         });
     } else {
         dayChart.data.labels=labels;
@@ -257,14 +257,19 @@ function updateCharts(){
 }
 
 /* =========================
-   LOAD MARKET
+   FIXED LOAD (NO CRASH)
 ========================= */
 async function load(){
 
     try{
 
-        let res=await fetch("https://api.hypixel.net/skyblock/bazaar");
-        let data=await res.json();
+        const res = await fetch("https://api.hypixel.net/skyblock/bazaar");
+
+        if(!res.ok) throw new Error("API FAIL");
+
+        const data = await res.json();
+
+        if(!data.products) throw new Error("NO DATA");
 
         let items=[];
 
@@ -301,14 +306,15 @@ async function load(){
         allMarketItems = items.slice();
 
         items.sort((a,b)=>b.score-a.score);
-        items=items.slice(0,15);
+        items = items.slice(0,15);
 
         render(items);
 
         document.getElementById("status").innerText="🟢 LIVE";
 
     } catch(e){
-        document.getElementById("status").innerText="❌ ERROR";
+        console.log(e);
+        document.getElementById("status").innerText="⚠ API ERROR (retrying...)";
     }
 }
 
@@ -344,7 +350,7 @@ function render(items){
 }
 
 /* =========================
-   LOOP (5 SEC STABLE)
+   STABLE LOOP (5s FIX)
 ========================= */
 async function loop(){
     await load();
