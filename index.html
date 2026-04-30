@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>AI Bazaar Trading Dashboard PRO</title>
+<title>AI Bazaar Trading Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
@@ -11,7 +11,8 @@ body{margin:0;font-family:Arial;background:#0b0f14;color:#e6e6e6}
 .sidebar{background:#0f172a;padding:10px;border-right:1px solid #222}
 .main{padding:12px}
 
-select,input{width:100%;padding:8px;margin-bottom:10px;background:#111827;color:white;border:none}
+select{width:100%;padding:8px;margin-bottom:10px;background:#111827;color:white;border:none}
+.toggle{background:#111827;padding:8px;border:1px solid #333;cursor:pointer;margin-bottom:10px}
 
 .kpis{display:flex;gap:10px;margin-bottom:10px}
 .card{flex:1;background:#111827;padding:10px;border-radius:6px}
@@ -29,16 +30,16 @@ canvas{background:#0f172a;margin-top:10px;padding:10px;border-radius:8px}
 <body>
 
 <div class="header">
-<h2>🤖 AI Bazaar Trading Dashboard PRO</h2>
+<h2>🤖 AI Bazaar Trading Dashboard</h2>
 <span id="status">Loading...</span>
 </div>
 
 <div class="container">
 
 <div class="sidebar">
-<label>Min ROI %</label>
-<input type="range" id="minROI" min="0" max="50" value="5">
-<span id="roiLabel">5%</span>
+<div class="toggle" id="toggleBtn">
+🧠 Manipulation: <span id="manState">ON</span>
+</div>
 
 <select id="itemSelect"></select>
 </div>
@@ -46,15 +47,14 @@ canvas{background:#0f172a;margin-top:10px;padding:10px;border-radius:8px}
 <div class="main">
 
 <div class="kpis">
-<div class="card"><h4>🔥 Best Score</h4><p id="bestScore">-</p></div>
+<div class="card"><h4>🔥 Best PPH</h4><p id="bestPH">-</p></div>
 <div class="card"><h4>📊 Items</h4><p id="itemCount">0</p></div>
 </div>
 
 <table id="table">
 <tr>
-<th>Item</th><th>Price</th><th>ROI%</th>
-<th>Spread%</th><th>PPH</th><th>Vol</th>
-<th>TTS</th><th>AI</th><th>Buy</th><th>Sell</th>
+<th>Item</th><th>Price</th><th>ROI</th>
+<th>PPH</th><th>Buy</th><th>Sell</th>
 </tr>
 </table>
 
@@ -64,124 +64,166 @@ canvas{background:#0f172a;margin-top:10px;padding:10px;border-radius:8px}
 </div>
 
 <script>
+document.addEventListener("DOMContentLoaded", () => {
+
 const TAX = 0.01125;
 
+let showManipulation = true;
 let chart = null;
-let tableRows = {};
-let historyCache = {};
 
-/* DOM */
+let tableRows = {};
+let lastSignals = {};
+let currentSelected = null;
+
+/* DOM refs */
+const manState = document.getElementById("manState");
 const itemSelect = document.getElementById("itemSelect");
-const bestScore = document.getElementById("bestScore");
+const bestPH = document.getElementById("bestPH");
 const itemCount = document.getElementById("itemCount");
 const status = document.getElementById("status");
-const roiSlider = document.getElementById("minROI");
-const roiLabel = document.getElementById("roiLabel");
+const chartCanvas = document.getElementById("chartCanvas");
+const table = document.getElementById("table");
 
-/* ===== HISTORY ===== */
+/* TOGGLE */
+document.getElementById("toggleBtn").onclick = () => {
+    showManipulation = !showManipulation;
+    manState.innerText = showManipulation ? "ON":"OFF";
+};
+
+/* HISTORY */
 function saveHistory(item, price){
-    let h = getHistory(item);
+    let h = JSON.parse(localStorage.getItem(item)||"[]");
     h.push({time:Date.now(),price});
-    if(h.length>200) h.shift();
+    if(h.length>200)h.shift();
     localStorage.setItem(item,JSON.stringify(h));
 }
-
 function getHistory(item){
-    if(!historyCache[item]){
-        historyCache[item] = JSON.parse(localStorage.getItem(item)||"[]");
+    return JSON.parse(localStorage.getItem(item)||"[]");
+}
+
+/* MATH */
+function regression(h){
+    if(!h || h.length < 10) return null;
+    let n=h.length,sx=0,sy=0,sxy=0,sxx=0;
+    for(let i=0;i<n;i++){
+        sx+=i; sy+=h[i].price;
+        sxy+=i*h[i].price; sxx+=i*i;
     }
-    return historyCache[item];
+    let d=n*sxx-sx*sx;
+    if(d===0) return null;
+    let slope=(n*sxy-sx*sy)/d;
+    let b=(sy-slope*sx)/n;
+    return slope*n+b;
 }
 
-/* ===== MATH ===== */
-function spreadPercent(buy, sell){
-    return ((sell - buy) / buy) * 100;
+function trend(h){
+    if(!h || h.length < 50) return "STABLE";
+    let s=regression(h.slice(-10));
+    let l=regression(h.slice(-50));
+    if(!s||!l) return "STABLE";
+    if(s>l*1.01) return "UP";
+    if(s<l*0.99) return "DOWN";
+    return "STABLE";
 }
 
-function volatility(h){
-    if(h.length < 20) return 0;
-    let avg = h.reduce((a,b)=>a+b.price,0)/h.length;
-    let variance = h.reduce((a,b)=>a+(b.price-avg)**2,0)/h.length;
-    return Math.sqrt(variance);
-}
-
-function hourlyVol(s){
-    return s.sellMovingWeek / 168;
-}
-
-function truePPH(buy, sell, s){
-    let profit = (sell - buy) - (sell * TAX);
-    return profit>0 ? profit * hourlyVol(s) : 0;
-}
-
-function timeToSell(s){
-    let hourly = s.sellMovingWeek / 168;
-    return hourly > 0 ? 3600 / hourly : Infinity;
-}
-
-function formatTime(sec){
-    if(sec===Infinity) return "∞";
-    if(sec<60) return sec.toFixed(0)+"s";
-    if(sec<3600) return (sec/60).toFixed(1)+"m";
-    return (sec/3600).toFixed(1)+"h";
-}
-
-/* ===== AI ===== */
 function pump(h){
-    let avg = h.reduce((a,b)=>a+b.price,0)/h.length;
+    if(!h || h.length===0) return false;
+    let avg=h.reduce((a,b)=>a+b.price,0)/h.length;
     return h[h.length-1].price > avg*1.25;
 }
 
-function fakePump(h){
-    if(h.length<20) return false;
-    let last=h[h.length-1].price;
-    let prev=h[h.length-5].price;
-    return pump(h) && last < prev*0.9;
+function cycle(h){
+    if(!h || h.length < 30) return "MID";
+    let p=h.map(x=>x.price);
+    let min=Math.min(...p),max=Math.max(...p);
+    let pos=(p[p.length-1]-min)/(max-min || 1);
+    if(pos<0.25) return "BOTTOM";
+    if(pos>0.75) return "TOP";
+    return "MID";
 }
 
-function aiScore(item){
-    let score=0;
-    score += item.roi * 2;
-    score += item.pph / 1000;
-    score += item.vol * 0.5;
-
-    if(item.buy.includes("BUY")) score += 10;
-    if(item.sell.includes("PROFIT")) score += 5;
-    if(item.buy.includes("MANIP")) score -= 20;
-
-    return score;
+function spread(h){
+    if(!h || h.length < 20) return false;
+    let r=h.slice(-10).map(x=>x.price);
+    let o=h.slice(-20,-10).map(x=>x.price);
+    let ra=r.reduce((a,b)=>a+b,0)/r.length;
+    let oa=o.reduce((a,b)=>a+b,0)/o.length;
+    return ra < oa * 0.98;
 }
 
-/* ===== SIGNALS ===== */
-function buySignal(roi,h){
-    if(h.length<20) return "WAIT";
-    if(fakePump(h)) return "🚨 DUMP";
+function hourlyVol(s){ return s.sellMovingWeek/168; }
+function truePPH(buy,sell,s){
+    let profit=(sell-buy)-(sell*TAX);
+    return profit>0 ? profit*hourlyVol(s) : 0;
+}
+
+function buySig(roi,h){
+    if(!h || h.length < 20) return "WAIT";
     if(pump(h)) return "❌ MANIP";
-
-    let last=h[h.length-1].price;
-    let avg=h.reduce((a,b)=>a+b.price,0)/h.length;
-
-    if(last < avg*0.85) return "🟢 BUY";
-    if(last < avg*0.95) return "🟡 EARLY";
-
+    let c=h[h.length-1].price;
+    let p=regression(h);
+    if(cycle(h)==="BOTTOM") return "🟢 BUY";
+    if(p && p>c*1.02) return "🟢 EARLY";
     return "❌ AVOID";
 }
 
-function sellSignal(roi){
+function sellSig(roi,h){
+    if(!h || h.length < 20) return "HOLD";
     if(roi>10) return "💰 PROFIT";
-    if(roi<0) return "📉 EXIT";
+    if(cycle(h)==="TOP") return "📈 TOP";
+    if(trend(h)==="DOWN") return "📉 EXIT";
+    if(spread(h)) return "⚠ SPREAD";
     return "HOLD";
 }
 
-/* ===== CHART ===== */
-function movingAvg(data, period=10){
-    return data.map((_,i)=>{
-        if(i<period) return null;
-        let slice=data.slice(i-period,i);
-        return slice.reduce((a,b)=>a+b,0)/period;
+/* TABLE */
+function updateRow(item){
+    if(!tableRows[item.name]){
+        let tr=document.createElement("tr");
+        tr.innerHTML=`<td></td><td></td><td></td><td></td><td></td><td></td>`;
+        tableRows[item.name]=tr;
+        table.appendChild(tr);
+    }
+
+    let tr=tableRows[item.name];
+    let cells=tr.children;
+
+    let prev = lastSignals[item.name] || {};
+    if(prev.buy !== item.buy || prev.sell !== item.sell){
+        tr.classList.add("highlight");
+        setTimeout(()=>tr.classList.remove("highlight"),1000);
+    }
+
+    lastSignals[item.name] = {buy:item.buy, sell:item.sell};
+
+    cells[0].innerText=item.name;
+    cells[1].innerText=item.price.toFixed(1);
+    cells[2].innerText=item.roi.toFixed(2);
+    cells[3].innerText=item.pph.toFixed(0);
+    cells[4].innerText=item.buy;
+    cells[5].innerText=item.sell;
+}
+
+function sortTable(items){
+    items.forEach(i=>{
+        let row=tableRows[i.name];
+        if(row) table.appendChild(row);
     });
 }
 
+function updateSelector(items){
+    if(itemSelect.options.length>0) return;
+    items.forEach(i=>{
+        let o=document.createElement("option");
+        o.value=i.name;
+        o.text=i.name;
+        itemSelect.appendChild(o);
+    });
+    currentSelected = items[0]?.name;
+    itemSelect.value=currentSelected;
+}
+
+/* CHART */
 function drawChart(){
     let item=itemSelect.value;
     let h=getHistory(item);
@@ -190,141 +232,79 @@ function drawChart(){
     let labels=h.map(x=>new Date(x.time).toLocaleTimeString());
     let data=h.map(x=>x.price);
 
-    let ma = movingAvg(data);
-
     if(!chart){
         chart=new Chart(chartCanvas,{
             type:"line",
-            data:{
-                labels,
-                datasets:[
-                    {data, borderColor:"#22c55e"},
-                    {data:ma, borderColor:"#f59e0b"}
-                ]
-            }
+            data:{labels,datasets:[{data,borderColor:"#22c55e"}]}
         });
     }else{
         chart.data.labels=labels;
         chart.data.datasets[0].data=data;
-        chart.data.datasets[1].data=ma;
         chart.update();
     }
 }
 
 itemSelect.onchange = drawChart;
 
-/* ===== TABLE ===== */
-function updateRow(item){
-    if(!tableRows[item.name]){
-        let tr=document.createElement("tr");
-        tr.innerHTML=`<td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>`;
-        tableRows[item.name]=tr;
-        table.appendChild(tr);
-    }
-
-    let cells=tableRows[item.name].children;
-
-    cells[0].innerText=item.name;
-    cells[1].innerText=item.price.toFixed(1);
-    cells[2].innerText=item.roi.toFixed(2);
-    cells[3].innerText=item.spread.toFixed(2);
-    cells[4].innerText=item.pph.toFixed(0);
-    cells[5].innerText=item.vol.toFixed(1);
-    cells[6].innerText=formatTime(item.tts);
-    cells[7].innerText=item.score.toFixed(1);
-    cells[8].innerText=item.buy;
-    cells[9].innerText=item.sell;
-}
-
-/* ===== LOAD ===== */
+/* LOAD */
 async function load(){
-try{
-    let res=await fetch("https://api.hypixel.net/skyblock/bazaar");
-    let data=await res.json();
+    try{
+        let res=await fetch("https://api.hypixel.net/skyblock/bazaar");
+        let data=await res.json();
 
-    let items=[];
-    let minROI = parseFloat(roiSlider.value);
-    roiLabel.innerText = minROI+"%";
+        let items=[];
 
-    for(let id in data.products){
-        let s=data.products[id].quick_status;
-        if(!s || s.sellMovingWeek<100000) continue;
+        for(let id in data.products){
+            let s=data.products[id].quick_status;
+            if(!s || s.sellMovingWeek<100000) continue;
 
-        let instaBuy=s.sellPrice;
-        let instaSell=s.buyPrice;
-        if(!instaBuy||!instaSell) continue;
+            let buy=s.sellPrice;
+            let sell=s.buyPrice;
+            if(!buy||!sell) continue;
 
-        let profit=(instaSell-instaBuy)-(instaSell*TAX);
-        let roi=(profit/instaBuy)*100;
+            let profit=(sell-buy)-(sell*TAX);
+            let roi=(profit/buy)*100;
 
-        if(roi < minROI) continue;
+            let name=id.replaceAll("_"," ");
 
-        let name=id.replaceAll("_"," ");
+            saveHistory(name,buy);
+            let h=getHistory(name);
+            if(h.length<10) continue;
 
-        saveHistory(name,instaBuy);
-        let h=getHistory(name);
-        if(h.length<20) continue;
+            let b=buySig(roi,h);
+            let se=sellSig(roi,h);
 
-        let spread=spreadPercent(instaBuy,instaSell);
-        let vol=volatility(h);
-        let pph=truePPH(instaBuy,instaSell,s);
-        let tts=timeToSell(s);
+            if(!showManipulation && b.includes("MANIP")) continue;
 
-        let buy=buySignal(roi,h);
-        let sell=sellSignal(roi);
+            items.push({
+                name,price:buy,roi,
+                buy:b,sell:se,
+                pph:truePPH(buy,sell,s)
+            });
+        }
 
-        let item={
-            name,
-            price:instaBuy,
-            roi,
-            spread,
-            vol,
-            pph,
-            tts,
-            buy,
-            sell
-        };
+        items.sort((a,b)=>b.pph-a.pph);
+        items=items.slice(0,10);
 
-        item.score = aiScore(item);
-        items.push(item);
+        items.forEach(updateRow);
+        sortTable(items);
+        updateSelector(items);
+        drawChart();
+
+        bestPH.innerText = items[0]?.pph.toFixed(0)||"-";
+        itemCount.innerText = items.length;
+        status.innerText="🟢 LIVE";
+
+    }catch(e){
+        console.error(e);
+        status.innerText="⚠ ERROR";
     }
-
-    items.sort((a,b)=>b.score-a.score);
-    items=items.slice(0,10);
-
-    table.innerHTML = `<tr>
-<th>Item</th><th>Price</th><th>ROI%</th>
-<th>Spread%</th><th>PPH</th><th>Vol</th>
-<th>TTS</th><th>AI</th><th>Buy</th><th>Sell</th>
-</tr>`;
-
-    tableRows={};
-
-    items.forEach(updateRow);
-
-    if(itemSelect.options.length===0){
-        items.forEach(i=>{
-            let o=document.createElement("option");
-            o.value=i.name;
-            o.text=i.name;
-            itemSelect.appendChild(o);
-        });
-    }
-
-    drawChart();
-
-    bestScore.innerText = items[0]?.score.toFixed(1) || "-";
-    itemCount.innerText = items.length;
-    status.innerText="🟢 LIVE";
-
-}catch(e){
-    console.error(e);
-    status.innerText="⚠ ERROR";
-}
 }
 
 setInterval(load,5000);
 load();
+
+});
 </script>
 
 </body>
