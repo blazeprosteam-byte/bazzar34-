@@ -1,1 +1,333 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>AI Bazaar Trading Dashboard+</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
+<style>
+body{margin:0;font-family:Arial;background:#0b0f14;color:#e6e6e6}
+.header{padding:12px;background:#111827;border-bottom:1px solid #222}
+.container{display:grid;grid-template-columns:260px 1fr;height:100vh}
+.sidebar{background:#0f172a;padding:10px;border-right:1px solid #222}
+.main{padding:12px}
+
+select,input{width:100%;padding:8px;margin-bottom:10px;background:#111827;color:white;border:none}
+
+.kpis{display:flex;gap:10px;margin-bottom:10px}
+.card{flex:1;background:#111827;padding:10px;border-radius:6px}
+
+table{width:100%;border-collapse:collapse}
+th,td{padding:6px;border-bottom:1px solid #222;text-align:center}
+th{background:#111827}
+
+.highlight{background:#1f2937;}
+canvas{background:#0f172a;margin-top:10px;padding:10px;border-radius:8px}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+<h2>🤖 AI Bazaar Trading Dashboard+</h2>
+<span id="status">Loading...</span>
+</div>
+
+<div class="container">
+
+<div class="sidebar">
+<div class="toggle" id="toggleBtn">
+🧠 Manipulation: <span id="manState">ON</span>
+</div>
+
+<label>Min ROI %</label>
+<input type="range" id="roiSlider" min="0" max="50" value="5">
+<div id="roiLabel">5%</div>
+
+<select id="itemSelect"></select>
+</div>
+
+<div class="main">
+
+<div class="kpis">
+<div class="card"><h4>🔥 Best AI</h4><p id="bestAI">-</p></div>
+<div class="card"><h4>📊 Items</h4><p id="itemCount">0</p></div>
+</div>
+
+<table id="table">
+<tr>
+<th>Item</th><th>Price</th><th>ROI%</th>
+<th>Spread%</th><th>PPH</th>
+<th>Vol</th><th>TTS</th>
+<th>AI</th><th>Buy</th><th>Sell</th>
+</tr>
+</table>
+
+<canvas id="chartCanvas" height="120"></canvas>
+
+</div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+
+const TAX = 0.01125;
+
+let showManipulation = true;
+let chart = null;
+
+let tableRows = {};
+let historyCache = {};
+
+/* DOM */
+const manState = document.getElementById("manState");
+const itemSelect = document.getElementById("itemSelect");
+const bestAI = document.getElementById("bestAI");
+const itemCount = document.getElementById("itemCount");
+const status = document.getElementById("status");
+const roiSlider = document.getElementById("roiSlider");
+const roiLabel = document.getElementById("roiLabel");
+
+/* TOGGLE */
+toggleBtn.onclick = () => {
+    showManipulation = !showManipulation;
+    manState.innerText = showManipulation ? "ON":"OFF";
+};
+
+/* HISTORY (cached) */
+function getHistory(item){
+    if(!historyCache[item]){
+        historyCache[item] = JSON.parse(localStorage.getItem(item)||"[]");
+    }
+    return historyCache[item];
+}
+
+function saveHistory(item, price){
+    let h = getHistory(item);
+    h.push({time:Date.now(),price});
+    if(h.length>200) h.shift();
+    localStorage.setItem(item,JSON.stringify(h));
+}
+
+/* ===== MATH ===== */
+function spreadPercent(buy,sell){
+    return ((sell-buy)/buy)*100;
+}
+
+function volatility(h){
+    if(h.length<20) return 0;
+    let avg=h.reduce((a,b)=>a+b.price,0)/h.length;
+    let v=h.reduce((a,b)=>a+(b.price-avg)**2,0)/h.length;
+    return Math.sqrt(v);
+}
+
+function hourlyVol(s){ return s.sellMovingWeek/168; }
+
+function truePPH(buy,sell,s){
+    let profit=(sell-buy)-(sell*TAX);
+    return profit>0 ? profit*hourlyVol(s) : 0;
+}
+
+function timeToSell(s){
+    let h=s.sellMovingWeek/168;
+    return h>0 ? 3600/h : Infinity;
+}
+
+function formatTime(sec){
+    if(sec===Infinity) return "∞";
+    if(sec<60) return sec.toFixed(0)+"s";
+    if(sec<3600) return (sec/60).toFixed(1)+"m";
+    return (sec/3600).toFixed(1)+"h";
+}
+
+/* ===== AI ===== */
+function pump(h){
+    let avg=h.reduce((a,b)=>a+b.price,0)/h.length;
+    return h[h.length-1].price > avg*1.25;
+}
+
+function fakePump(h){
+    if(h.length<20) return false;
+    let last=h[h.length-1].price;
+    let prev=h[h.length-5].price;
+    return pump(h) && last < prev*0.9;
+}
+
+function aiScore(item){
+    let s=0;
+    s += item.roi*2;
+    s += item.pph/1000;
+    s += item.vol*0.5;
+
+    if(item.buy.includes("BUY")) s+=10;
+    if(item.sell.includes("PROFIT")) s+=5;
+    if(item.buy.includes("MANIP")) s-=20;
+
+    return s;
+}
+
+/* SIGNALS */
+function buySig(roi,h){
+    if(h.length<20) return "WAIT";
+    if(fakePump(h)) return "🚨 DUMP";
+    if(pump(h)) return "❌ MANIP";
+
+    let last=h[h.length-1].price;
+    let avg=h.reduce((a,b)=>a+b.price,0)/h.length;
+
+    if(last<avg*0.85) return "🟢 BUY";
+    if(last<avg*0.95) return "🟡 EARLY";
+
+    return "❌ AVOID";
+}
+
+function sellSig(roi){
+    if(roi>10) return "💰 PROFIT";
+    if(roi<0) return "📉 EXIT";
+    return "HOLD";
+}
+
+/* CHART */
+function movingAvg(data,period=10){
+    return data.map((_,i)=>{
+        if(i<period) return null;
+        let s=data.slice(i-period,i);
+        return s.reduce((a,b)=>a+b,0)/period;
+    });
+}
+
+function drawChart(){
+    let h=getHistory(itemSelect.value);
+    if(!h.length) return;
+
+    let labels=h.map(x=>new Date(x.time).toLocaleTimeString());
+    let data=h.map(x=>x.price);
+
+    let ma=movingAvg(data);
+
+    if(!chart){
+        chart=new Chart(chartCanvas,{
+            type:"line",
+            data:{
+                labels,
+                datasets:[
+                    {data,borderColor:"#22c55e"},
+                    {data:ma,borderColor:"#f59e0b"}
+                ]
+            }
+        });
+    }else{
+        chart.data.labels=labels;
+        chart.data.datasets[0].data=data;
+        chart.data.datasets[1].data=ma;
+        chart.update();
+    }
+}
+
+itemSelect.onchange=drawChart;
+
+/* TABLE */
+function updateRow(item){
+    if(!tableRows[item.name]){
+        let tr=document.createElement("tr");
+        tr.innerHTML=`<td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>`;
+        tableRows[item.name]=tr;
+        table.appendChild(tr);
+    }
+
+    let c=tableRows[item.name].children;
+
+    c[0].innerText=item.name;
+    c[1].innerText=item.price.toFixed(1);
+    c[2].innerText=item.roi.toFixed(2);
+    c[3].innerText=item.spread.toFixed(2);
+    c[4].innerText=item.pph.toFixed(0);
+    c[5].innerText=item.vol.toFixed(1);
+    c[6].innerText=formatTime(item.tts);
+    c[7].innerText=item.score.toFixed(1);
+    c[8].innerText=item.buy;
+    c[9].innerText=item.sell;
+}
+
+/* LOAD */
+async function load(){
+try{
+    let res=await fetch("https://api.hypixel.net/skyblock/bazaar");
+    let data=await res.json();
+
+    let items=[];
+    let minROI=roiSlider.value;
+    roiLabel.innerText=minROI+"%";
+
+    for(let id in data.products){
+        let s=data.products[id].quick_status;
+        if(!s||s.sellMovingWeek<100000) continue;
+
+        let instaBuy=s.sellPrice;
+        let instaSell=s.buyPrice;
+        if(!instaBuy||!instaSell) continue;
+
+        let profit=(instaSell-instaBuy)-(instaSell*TAX);
+        let roi=(profit/instaBuy)*100;
+        if(roi<minROI) continue;
+
+        let name=id.replaceAll("_"," ");
+
+        saveHistory(name,instaBuy);
+        let h=getHistory(name);
+        if(h.length<20) continue;
+
+        let item={
+            name,
+            price:instaBuy,
+            roi,
+            spread:spreadPercent(instaBuy,instaSell),
+            vol:volatility(h),
+            pph:truePPH(instaBuy,instaSell,s),
+            tts:timeToSell(s),
+            buy:buySig(roi,h),
+            sell:sellSig(roi)
+        };
+
+        if(!showManipulation && item.buy.includes("MANIP")) continue;
+
+        item.score=aiScore(item);
+        items.push(item);
+    }
+
+    items.sort((a,b)=>b.score-a.score);
+    items=items.slice(0,10);
+
+    table.innerHTML = table.rows[0].outerHTML;
+    tableRows={};
+
+    items.forEach(updateRow);
+
+    if(itemSelect.options.length===0){
+        items.forEach(i=>{
+            let o=document.createElement("option");
+            o.value=i.name;
+            o.text=i.name;
+            itemSelect.appendChild(o);
+        });
+    }
+
+    drawChart();
+
+    bestAI.innerText=items[0]?.score.toFixed(1)||"-";
+    itemCount.innerText=items.length;
+    status.innerText="🟢 LIVE";
+
+}catch(e){
+    console.error(e);
+    status.innerText="⚠ ERROR";
+}
+}
+
+setInterval(load,5000);
+load();
+
+});
+</script>
+
+</body>
+</html>
