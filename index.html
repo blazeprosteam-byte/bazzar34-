@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>AI Bazaar Dashboard FIXED</title>
+<title> Bazaar Trading Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
@@ -27,20 +27,23 @@ canvas{background:#0f172a;margin-top:10px;padding:10px;border-radius:8px}
 <body>
 
 <div class="header">
-<h2>🤖 AI Bazaar Dashboard FIXED</h2>
+<h2>🤖 AI Bazaar Trading Dashboard</h2>
 <span id="status">Loading...</span>
 </div>
 
 <div class="container">
 
 <div class="sidebar">
+
 <button id="toggleBtn">🧠 Manipulation: ON</button>
 
-<label>Min ROI %</label>
+<label for="roiSlider">Min ROI %</label>
 <input type="range" id="roiSlider" min="0" max="50" value="5">
 <div id="roiLabel">5%</div>
 
+<label for="itemSelect">Select Item</label>
 <select id="itemSelect"></select>
+
 </div>
 
 <div class="main">
@@ -53,10 +56,16 @@ canvas{background:#0f172a;margin-top:10px;padding:10px;border-radius:8px}
 <table id="table">
 <thead>
 <tr>
-<th>Item</th><th>Price</th><th>ROI%</th>
-<th>Spread%</th><th>PPH</th>
-<th>Vol</th><th>TTS</th>
-<th>AI</th><th>Buy</th><th>Sell</th>
+<th>Item</th>
+<th>Price</th>
+<th>ROI%</th>
+<th>Spread%</th>
+<th>PPH</th>
+<th>Vol</th>
+<th>TTS</th>
+<th>AI</th>
+<th>Buy</th>
+<th>Sell</th>
 </tr>
 </thead>
 <tbody></tbody>
@@ -108,8 +117,10 @@ function saveHistory(item, price){
     localStorage.setItem(item,JSON.stringify(h));
 }
 
-/* CALCS */
-function spreadPercent(buy,sell){ return ((sell-buy)/buy)*100; }
+/* CALCULATIONS */
+function spreadPercent(buy,sell){
+    return ((sell-buy)/buy)*100;
+}
 
 function volatility(h){
     if(h.length<20) return 0;
@@ -118,7 +129,9 @@ function volatility(h){
     return Math.sqrt(v);
 }
 
-function hourlyVol(s){ return s.sellMovingWeek/168; }
+function hourlyVol(s){
+    return s.sellMovingWeek/168;
+}
 
 function truePPH(buy,sell,s){
     let profit=(sell-buy)-(sell*TAX);
@@ -137,14 +150,16 @@ function formatTime(sec){
     return (sec/3600).toFixed(1)+"h";
 }
 
-/* AI */
+/* AI SCORE */
 function aiScore(item){
     let s=0;
     s+=item.roi*2;
     s+=item.pph/1000;
     s+=item.vol*0.5;
+
     if(item.buy.includes("BUY")) s+=10;
     if(item.buy.includes("MANIP")) s-=20;
+
     return s;
 }
 
@@ -183,7 +198,7 @@ function drawChart(){
 
 itemSelect.onchange = drawChart;
 
-/* LOAD */
+/* LOAD DATA */
 async function load(){
 try{
     let res=await fetch("https://api.hypixel.net/skyblock/bazaar");
